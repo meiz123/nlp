@@ -1,0 +1,6 @@
+{
+  "translations": [
+    {"key": "save", "english": "Save", "vietnamese": "Lưu", "context": "Nút lưu"},
+    {"key": "greeting", "english": "Hello %1$s", "vietnamese": "Xin chào", "context": "Lời chào kèm tên người dùng"}
+  ]
+}
