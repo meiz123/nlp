@@ -1,6 +1,6 @@
 import json, sys, threading
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,QLineEdit,QPlainTextEdit,QTableWidget,QTableWidgetItem,QFileDialog,QMessageBox,QCheckBox,QInputDialog,QSplitter,QFrame,QComboBox,QProgressBar,QHeaderView,QAbstractItemView,QScrollArea,QMenu)
+from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QPushButton,QLabel,QLineEdit,QPlainTextEdit,QTableWidget,QTableWidgetItem,QFileDialog,QMessageBox,QCheckBox,QInputDialog,QSplitter,QFrame,QComboBox,QProgressBar,QHeaderView,QAbstractItemView,QScrollArea,QMenu,QTabWidget,QSizePolicy)
 from PySide6.QtGui import QColor
 from .core import Project,load_csv,technical,fingerprint,export_rows,export_training
 
@@ -54,20 +54,20 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Localization QA • Anh–Việt');self.resize(1380,900);self.setMinimumSize(1020,720)
-        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._loading_feedback=False
+        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._translation_drafts={};self._draft_project=None;self._loading_feedback=False
         root=QWidget();root.setObjectName('root');self.setCentralWidget(root)
-        layout=QVBoxLayout(root);layout.setContentsMargins(28,22,28,18);layout.setSpacing(16)
+        layout=QVBoxLayout(root);layout.setContentsMargins(18,14,18,12);layout.setSpacing(10)
         header=QHBoxLayout();layout.addLayout(header)
         brand=QVBoxLayout();title=QLabel('Localization QA');title.setObjectName('title');brand.addWidget(title)
         subtitle=QLabel('Không bỏ sót ý nghĩa. Giữ câu chữ tự nhiên.');subtitle.setObjectName('muted');brand.addWidget(subtitle);header.addLayout(brand);header.addStretch()
         self.project_label=QLabel('Chưa mở project');self.project_label.setObjectName('badge');header.addWidget(self.project_label)
         self.configbutton=QPushButton('Cấu hình Gemini');self.configbutton.setCheckable(True);header.addWidget(self.configbutton)
         bar=QHBoxLayout();layout.addLayout(bar);self.actions=[]
-        for label,fn in [('＋ Tạo project',self.new),('Mở project',self.open),('Nhập dữ liệu',self.import_csv),('Xuất báo cáo',self.export),('Xuất dữ liệu train',self.export_training_data),('Nhập bảng so sánh',self.import_comparison_csv)]:
+        for label,fn in [('＋ Tạo project',self.new),('Mở project / dữ liệu',self.open),('Nhập dữ liệu',self.import_csv),('Xuất báo cáo',self.export),('Xuất dữ liệu train',self.export_training_data),('Nhập bảng so sánh',self.import_comparison_csv)]:
             b=QPushButton(label)
             b.clicked.connect(fn)
             bar.addWidget(b);self.actions.append(b)
-        bar.addStretch();step=QLabel('01  Nhập dữ liệu    →    02  Kiểm tra    →    03  Duyệt & xuất');step.setObjectName('muted');bar.addWidget(step)
+        bar.addStretch()
         self.settings=QFrame();self.settings.setObjectName('card');cfg=QVBoxLayout(self.settings);cfg.setContentsMargins(18,14,18,14);cfg.setSpacing(10)
         layout.addWidget(self.settings);self.configbutton.toggled.connect(self.settings.setVisible)
         line=QHBoxLayout();cfg.addLayout(line)
@@ -85,7 +85,7 @@ class Window(QMainWindow):
         self.configbutton.setChecked(not bool(self.key.text()));self.settings.setVisible(self.configbutton.isChecked())
         stats=QHBoxLayout();layout.addLayout(stats);self.stat_labels=[]
         for name in ['TỔNG SỐ CÂU','CẦN XEM LẠI','LỖI RÕ RÀNG','ĐÃ REVIEW']:
-            card=QFrame();card.setObjectName('card');box=QVBoxLayout(card);box.setContentsMargins(16,10,16,10)
+            card=QFrame();card.setObjectName('card');box=QHBoxLayout(card);box.setContentsMargins(12,8,12,8)
             number=QLabel('0');number.setObjectName('number');box.addWidget(number);label=QLabel(name);label.setObjectName('muted');box.addWidget(label);stats.addWidget(card);self.stat_labels.append(number)
         filters=QHBoxLayout();layout.addLayout(filters)
         self.search=QLineEdit();self.search.setPlaceholderText('Tìm key, câu tiếng Anh hoặc tiếng Việt…');self.search.textChanged.connect(self.filter_rows);filters.addWidget(self.search,2)
@@ -93,28 +93,43 @@ class Window(QMainWindow):
         self.offline=QCheckBox('Chỉ kiểm tra kỹ thuật');filters.addWidget(self.offline)
         self.runbutton=QPushButton('Bắt đầu kiểm tra');self.runbutton.setObjectName('primary');self.runbutton.clicked.connect(self.run);filters.addWidget(self.runbutton)
         self.stopbutton=QPushButton('Dừng');self.stopbutton.clicked.connect(self.stop);self.stopbutton.setEnabled(False);filters.addWidget(self.stopbutton)
-        splitter=QSplitter(Qt.Orientation.Horizontal);layout.addWidget(splitter,1)
-        left=QFrame();left.setObjectName('card');leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,0,0,0)
-        self.empty=QLabel('Bắt đầu với một project mới\n\nNhập CSV, JSON hoặc Word có cặp câu Anh–Việt.\nChọn cả hai file JSON Anh và Việt cùng lúc trong Nhập dữ liệu.\nKết quả được lưu để tiếp tục trên Mac hoặc Windows.');self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);self.empty.setObjectName('empty');leftbox.addWidget(self.empty)
-        self.table=QTableWidget(0,8);self.table.setHorizontalHeaderLabels(['Key','Tiếng Anh','Tiếng Việt','Đánh giá','Đã review','Ghi chú','Local','Gemini']);self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);self.table.setAlternatingRowColors(True);self.table.setShowGrid(False);self.table.verticalHeader().hide();self.table.verticalHeader().setDefaultSectionSize(54)
-        self.table.itemSelectionChanged.connect(self.select);self.table.itemChanged.connect(self.table_feedback_changed);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive);self.table.horizontalHeader().setStretchLastSection(True);leftbox.addWidget(self.table);splitter.addWidget(left)
-        panel=QFrame();panel.setObjectName('card');right=QVBoxLayout(panel);right.setContentsMargins(18,16,18,16);right.setSpacing(10)
-        self.rowtitle=QLabel('Chọn một câu để review');self.rowtitle.setObjectName('sectionTitle');self.rowtitle.setWordWrap(True);right.addWidget(self.rowtitle)
-        right.addWidget(QLabel('TIẾNG ANH'))
-        self.source=QPlainTextEdit();self.source.setReadOnly(True);self.source.setMinimumHeight(60);self.source.setMaximumHeight(110);right.addWidget(self.source)
-        right.addWidget(QLabel('BẢN DỊCH HIỆN TẠI'))
-        self.current=QPlainTextEdit();self.current.setReadOnly(True);self.current.setMinimumHeight(60);self.current.setMaximumHeight(110);right.addWidget(self.current)
-        right.addWidget(QLabel('NHẬN XÉT & NGỮ CẢNH'))
-        self.detail=QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMinimumHeight(100);right.addWidget(self.detail,1)
-        right.addWidget(QLabel('GHI CHÚ CỦA BẠN'))
-        self.notes=QPlainTextEdit();self.notes.setPlaceholderText('Ví dụ: Gợi ý vẫn khó hiểu; cần sửa thuật ngữ…');self.notes.setMinimumHeight(60);self.notes.setMaximumHeight(80);self.notes.textChanged.connect(self.note_edited);right.addWidget(self.notes)
-        feedbackbar=QHBoxLayout();right.addLayout(feedbackbar)
-        self.reviewcheck=QCheckBox('Đã review');self.reviewcheck.setToolTip('Đã xem câu; chưa có nghĩa là bản sửa được duyệt để train.');self.reviewcheck.toggled.connect(self.review_toggled);feedbackbar.addWidget(self.reviewcheck)
-        self.savenotes=QPushButton('Lưu ghi chú');self.savenotes.clicked.connect(self.save_review_notes);feedbackbar.addWidget(self.savenotes)
-        final_label=QLabel('BẢN SỬA CUỐI • CHỈ DÙNG ĐỂ TRAIN SAU KHI DUYỆT');final_label.setWordWrap(True);right.addWidget(final_label)
-        self.translation=QPlainTextEdit();self.translation.setMinimumHeight(80);self.translation.setPlaceholderText('Đề xuất AI hoặc bản sửa của bạn');right.addWidget(self.translation,1)
-        self.approvebutton=QPushButton('✓ Duyệt bản sửa và lưu');self.approvebutton.setObjectName('primary');self.approvebutton.clicked.connect(self.approve);right.addWidget(self.approvebutton)
-        self.nextbutton=QPushButton('Câu tiếp theo chưa review →');self.nextbutton.clicked.connect(self.next_row);right.addWidget(self.nextbutton);panel.setMinimumHeight(780);reviewscroll=QScrollArea();reviewscroll.setWidgetResizable(True);reviewscroll.setWidget(panel);reviewscroll.setFrameShape(QFrame.Shape.NoFrame);splitter.addWidget(reviewscroll);splitter.setSizes([850,420])
+        self.review_splitter=QSplitter(Qt.Orientation.Horizontal);layout.addWidget(self.review_splitter,1)
+        left=QFrame();left.setObjectName('card');left.setMinimumWidth(270);leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,0,0,0)
+        self.empty=QLabel('Mở project hoặc dữ liệu để bắt đầu.\n\nCó thể chọn cả hai JSON Anh–Việt.');self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);self.empty.setObjectName('empty');self.empty.setWordWrap(True);leftbox.addWidget(self.empty)
+        self.table=QTableWidget(0,8);self.table.setHorizontalHeaderLabels(['Key','Danh sách câu','Tiếng Việt','Đánh giá','Review','Ghi chú','Local','Gemini']);self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);self.table.setAlternatingRowColors(True);self.table.setShowGrid(False);self.table.verticalHeader().hide();self.table.verticalHeader().setDefaultSectionSize(62)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.itemSelectionChanged.connect(self.select);self.table.itemChanged.connect(self.table_feedback_changed)
+        self.table.horizontalHeader().setStretchLastSection(False)
+        for column in (0,2,5,6,7):self.table.setColumnHidden(column,True)
+        self.table.horizontalHeader().setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3,QHeaderView.ResizeMode.Fixed);self.table.setColumnWidth(3,95)
+        self.table.horizontalHeader().setSectionResizeMode(4,QHeaderView.ResizeMode.Fixed);self.table.setColumnWidth(4,64)
+        leftbox.addWidget(self.table);self.review_splitter.addWidget(left)
+        self.review_panel=QFrame();self.review_panel.setObjectName('reviewCard');self.review_panel.setMinimumWidth(600)
+        right=QVBoxLayout(self.review_panel);right.setContentsMargins(16,12,16,12);right.setSpacing(8)
+        self.focuslabel=QLabel('CHỌN MỘT CÂU ĐỂ REVIEW');self.focuslabel.setObjectName('focusTitle');right.addWidget(self.focuslabel)
+        self.rowtitle=QLabel('');self.rowtitle.setObjectName('activeKey');self.rowtitle.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);right.addWidget(self.rowtitle)
+        sourcebar=QHBoxLayout();sourcebar.setSpacing(12);right.addLayout(sourcebar,2)
+        for label,fieldname in [('TIẾNG ANH','source'),('BẢN DỊCH HIỆN TẠI','current')]:
+            box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(label))
+            field=QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1);sourcebar.addLayout(box)
+        self.reviewtabs=QTabWidget();self.reviewtabs.setObjectName('reviewTabs');self.reviewtabs.setMinimumHeight(100);right.addWidget(self.reviewtabs,3)
+        self.detail=QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMinimumHeight(50);self.reviewtabs.addTab(self.detail,'Nhận xét & ngữ cảnh')
+        comparison=QWidget();comparebox=QHBoxLayout(comparison);comparebox.setContentsMargins(8,6,8,6);comparebox.setSpacing(12)
+        for title,fieldname in [('LOCAL','local_text'),('GEMINI','gemini_text')]:
+            box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(title));field=QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(50);setattr(self,fieldname,field);box.addWidget(field,1);comparebox.addLayout(box)
+        self.reviewtabs.addTab(comparison,'So sánh Local · Gemini')
+        editbar=QHBoxLayout();editbar.setSpacing(12);right.addLayout(editbar,3)
+        finalbox=QVBoxLayout();finalbox.setSpacing(5);final_label=QLabel('BẢN SỬA CUỐI');final_label.setToolTip('Chỉ dùng để train sau khi bạn duyệt bản sửa.');finalbox.addWidget(final_label)
+        self.translation=QPlainTextEdit();self.translation.setMinimumHeight(70);self.translation.textChanged.connect(self.translation_edited);self.translation.setPlaceholderText('Chỉnh bản dịch tại đây rồi duyệt');finalbox.addWidget(self.translation,1);editbar.addLayout(finalbox,3)
+        notesbox=QVBoxLayout();notesbox.setSpacing(5);noteshead=QHBoxLayout();noteshead.addWidget(QLabel('GHI CHÚ'));noteshead.addStretch()
+        self.savenotes=QPushButton('Lưu');self.savenotes.setToolTip('Lưu ghi chú, không duyệt bản dịch.');self.savenotes.setObjectName('compact');self.savenotes.clicked.connect(self.save_review_notes);noteshead.addWidget(self.savenotes);notesbox.addLayout(noteshead)
+        self.notes=QPlainTextEdit();self.notes.setMinimumHeight(70);self.notes.setPlaceholderText('Gợi ý chưa tốt ở đâu?');self.notes.textChanged.connect(self.note_edited);notesbox.addWidget(self.notes,1);editbar.addLayout(notesbox,2)
+        finalactions=QHBoxLayout();right.addLayout(finalactions)
+        self.reviewcheck=QCheckBox('Đã review');self.reviewcheck.setToolTip('Đã xem câu; bản sửa phải được duyệt riêng để train.');self.reviewcheck.toggled.connect(self.review_toggled);finalactions.addWidget(self.reviewcheck);finalactions.addStretch()
+        self.approvebutton=QPushButton('✓ Duyệt bản sửa');self.approvebutton.setObjectName('primary');self.approvebutton.clicked.connect(self.approve);finalactions.addWidget(self.approvebutton)
+        self.nextbutton=QPushButton('Câu tiếp →');self.nextbutton.setToolTip('Chuyển đến câu tiếp theo chưa review');self.nextbutton.clicked.connect(self.next_row);finalactions.addWidget(self.nextbutton)
+        self.review_splitter.addWidget(self.review_panel);self.review_splitter.setStretchFactor(0,1);self.review_splitter.setStretchFactor(1,3);self.review_splitter.setSizes([330,970])
         footer=QHBoxLayout();layout.addLayout(footer);self.status=QLabel('Sẵn sàng • Tạo hoặc mở project để bắt đầu.');self.status.setWordWrap(True);footer.addWidget(self.status,1)
         self.progressbar=QProgressBar();self.progressbar.setRange(0,1);self.progressbar.setValue(0);self.progressbar.setFixedWidth(220);self.progressbar.setFormat('%v / %m câu');footer.addWidget(self.progressbar)
         self.setStyleSheet(STYLE)
@@ -129,7 +144,9 @@ class Window(QMainWindow):
         query=self.search.text().casefold();mode=self.filter.currentIndex()
         for i,r in enumerate(self.data):
             result=json.loads(r['result']) if r['result'] else {};status=result.get('status','')
-            match=[True,status=='REVIEW',status=='FAIL',not r['result'],bool(r['reviewed']),not r['reviewed']][mode]
+            comparison=self.project.backend_results(r['key']).get('comparison',{}) if mode==1 else {}
+            needsreview=status=='REVIEW' or (bool(comparison) and comparison.get('winner')!='tie' and not r['reviewed'])
+            match=[True,needsreview,status=='FAIL',not r['result'],bool(r['reviewed']),not r['reviewed']][mode]
             self.table.setRowHidden(i,not (match and query in ' '.join([r['key'],r['english'],r['vietnamese']]).casefold()))
         i=self.table.currentRow()
         if i<0 or self.table.isRowHidden(i):
@@ -141,7 +158,7 @@ class Window(QMainWindow):
         current=self.table.currentRow()
         for i in list(range(current+1,len(self.data)))+list(range(0,current+1)):
             if not self.table.isRowHidden(i) and not self.data[i]['reviewed']:
-                self.table.selectRow(i);self.table.scrollToItem(self.table.item(i,0));return
+                self.table.selectRow(i);self.table.scrollToItem(self.table.item(i,1),QAbstractItemView.ScrollHint.PositionAtCenter);return
         self.status.setText('Không còn câu chưa review trong bộ lọc hiện tại.')
     def on_progress(self,done,total):
         self.progressbar.setRange(0,max(1,total));self.progressbar.setValue(done)
@@ -154,8 +171,8 @@ class Window(QMainWindow):
                 self._flush_note_drafts()
                 self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.close()
             self._selected_key=None;self._note_drafts.clear()
-            self.project=p;self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path)
-        except Exception as e:self.error(e)
+            self.project=p;self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path);return True
+        except Exception as e:self.error(e);return False
     def choose_file(self,title,filters,save=False):
         dialog=QFileDialog(self,title);dialog.setNameFilters(filters.split(';;'))
         dialog.setOption(QFileDialog.Option.DontUseNativeDialog,True)
@@ -184,8 +201,26 @@ class Window(QMainWindow):
         path,_=self.choose_file('Tạo project','Project (*.lqa)',True)
         if path:self.attach(path if path.endswith('.lqa') else path+'.lqa')
     def open(self):
-        path,_=self.choose_file('Mở project','Project (*.lqa)')
-        if path:self.attach(path)
+        if self.worker:return self.error('Dừng kiểm tra trước khi mở dữ liệu khác')
+        paths=self.choose_files('Mở project hoặc dữ liệu Anh–Việt',
+            'Project và dữ liệu (*.lqa *.csv *.json *.docx *.doc);;Project (*.lqa);;JSON (*.json);;CSV (*.csv);;Word (*.docx *.doc)')
+        if not paths:return
+        try:
+            from pathlib import Path
+            projects=[path for path in paths if Path(path).suffix.lower()=='.lqa']
+            if projects:
+                if len(paths)!=1:raise ValueError('Chọn một project .lqa riêng; không chọn chung với dữ liệu đầu vào.')
+                self.attach(projects[0])
+            else:self.import_selected_paths(paths,create_project=True)
+        except Exception as e:self.error(e)
+    def create_input_project(self):
+        from pathlib import Path
+        path,_=self.choose_file('Lưu project để giữ tiến độ review','Project (*.lqa)',True)
+        if not path:return False
+        if not path.lower().endswith('.lqa'):path+='.lqa'
+        if Path(path).exists():raise ValueError('Chọn tên project mới để giữ nguyên dữ liệu trong project đã có.')
+        return self.attach(path)
+
     def confirm_input_report(self, rows, report):
         diagnostics=report.get('diagnostics',[]) if isinstance(report,dict) else []
         if not diagnostics:return True
@@ -197,9 +232,9 @@ class Window(QMainWindow):
         return QMessageBox.question(self,'Kiểm tra dữ liệu trước khi nhập',message,
                                    QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
                                    QMessageBox.StandardButton.No)==QMessageBox.StandardButton.Yes
-    def apply_input_rows(self, rows, report=None):
+    def apply_input_rows(self, rows, report=None, *, confirmed=False):
         if not rows:raise ValueError('File chưa có cặp câu nào để nhập')
-        if not self.confirm_input_report(rows, report or {}):
+        if not confirmed and not self.confirm_input_report(rows, report or {}):
             self.status.setText('Đã hủy nhập dữ liệu. Project hiện tại được giữ nguyên.');return False
         # Parsing and warning confirmation finish before any project/feedback write.
         self._flush_note_drafts();self.project.import_rows(rows);self._note_drafts.clear();self.refresh()
@@ -219,7 +254,7 @@ class Window(QMainWindow):
             if not accepted:return None
             index=choices.index(selected)
             return Path(paths[index]),Path(paths[1-index])
-    def import_selected_paths(self, paths):
+    def import_selected_paths(self, paths, *, create_project=False):
         """Finish parsing and role selection before any project write."""
         from pathlib import Path
         from .input_json import load_json,load_json_pair,SingleLanguageJSONError
@@ -250,7 +285,12 @@ class Window(QMainWindow):
                 from .input_word import load_word
                 rows=load_word(str(path))
             else:raise ValueError('Chọn CSV, JSON, DOCX hoặc DOC. Có thể chọn cùng lúc hai JSON Anh–Việt.')
-        imported=self.apply_input_rows(rows,report)
+        if not rows:raise ValueError('File chưa có cặp câu nào để nhập')
+        if create_project:
+            if not self.confirm_input_report(rows,report):return False
+            if not self.create_input_project():
+                self.status.setText('Đã hủy lưu project. Dữ liệu chưa được nhập.');return False
+        imported=self.apply_input_rows(rows,report,confirmed=create_project)
         if imported:
             self.status.setText(self.status.text()+' Nguồn: '+' + '.join(path.name for path in sources))
             self.status.setToolTip('\n'.join(str(path) for path in sources))
@@ -286,6 +326,10 @@ class Window(QMainWindow):
             except Exception as e:self.error(e)
     def refresh(self):
         if not self.project:return
+        if self._draft_project is not self.project:
+            self._draft_project=self.project
+            try:self._translation_drafts=json.loads(self.project.setting('translation_drafts','{}'))
+            except (ValueError,TypeError):self._translation_drafts={}
         oldkey=self.data[self.table.currentRow()]['key'] if 0<=self.table.currentRow()<len(self.data) else None
         self.data=self.project.rows();self.table.blockSignals(True)
         if self.table.rowCount()!=len(self.data):self.table.setRowCount(len(self.data))
@@ -308,7 +352,7 @@ class Window(QMainWindow):
                     item.setFlags(flags);item.setCheckState(Qt.CheckState.Checked if r['reviewed'] else Qt.CheckState.Unchecked)
                 else:item.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsSelectable)
                 if j==3:item.setForeground(QColor({'PASS':'#15803d','REVIEW':'#b45309','FAIL':'#dc2626'}.get(status,'#64748b')))
-        self.table.setColumnWidth(0,120);self.table.setColumnWidth(1,240);self.table.setColumnWidth(2,240);self.table.setColumnWidth(3,120);self.table.setColumnWidth(4,90);self.table.setColumnWidth(5,180);self.table.setColumnWidth(6,240);self.table.setColumnWidth(7,240)
+        self.table.setColumnWidth(3,95);self.table.setColumnWidth(4,64)
         self.table.blockSignals(False)
         for label,value in zip(self.stat_labels,counts):label.setText(str(value))
         self.stat_labels[2].setText('—' if incomplete_comparison_qa else str(counts[2]))
@@ -321,21 +365,39 @@ class Window(QMainWindow):
     def select(self):
         i=self.table.currentRow()
         if i<0 or i>=len(self.data):
-            self.rowtitle.setText('Chọn một câu để review')
+            self.rowtitle.setText('');self.focuslabel.setText('CHỌN MỘT CÂU ĐỂ REVIEW')
             self._selected_key=None;self._loading_feedback=True
-            for field in [self.source,self.current,self.detail,self.translation,self.notes]:field.clear()
+            for field in [self.source,self.current,self.detail,self.translation,self.notes,self.local_text,self.gemini_text]:field.clear()
             self.reviewcheck.setChecked(False);self._loading_feedback=False
             self.refresh_controls();return
         r=self.data[i];result=json.loads(r['result']) if r['result'] else {}
         self._selected_key=r['key'];self._loading_feedback=True
         self.notes.setPlainText(self._note_drafts.get(r['key'],r.get('notes','')));self.reviewcheck.setChecked(bool(r['reviewed']));self._loading_feedback=False
-        self.rowtitle.setText(r['key']);self.source.setPlainText(r['english']);self.current.setPlainText(r['vietnamese'])
+        self.rowtitle.setText(r['key']);self.rowtitle.setToolTip(r['key']);self.source.setPlainText(r['english']);self.current.setPlainText(r['vietnamese'])
+        state='Đã review' if r['reviewed'] else 'Chưa review'
+        self.focuslabel.setText(f'ĐANG REVIEW · Câu {i+1} / {len(self.data)} · {state}')
+        self.table.scrollToItem(self.table.item(i,1),QAbstractItemView.ScrollHint.PositionAtCenter)
         backend=self.project.backend_results(r['key']);comparison=backend.get('comparison',{})
+        self.local_text.setPlainText(backend.get('local',{}).get('translation','Chưa có kết quả local.'))
+        self.gemini_text.setPlainText(backend.get('gemini',{}).get('translation',result.get('suggestion') or 'Chưa có bản sửa Gemini riêng.'))
         message='\n'.join('• '+issue for issue in result.get('issues',[]))
         if comparison:
             message+='\nSo sánh: '+comparison.get('reason','')+'\nCần thêm ngữ cảnh: '+comparison.get('context_needed','')
         self.detail.setPlainText(message+'\n'+result.get('reason','Chưa có đánh giá QA riêng; đang xem kết quả so sánh.' if comparison else 'Chưa kiểm tra. Bạn có thể tự review hoặc bắt đầu kiểm tra AI.')+'\n\nNgữ cảnh: '+(r['context'] or 'Chưa cung cấp'))
-        self.translation.setPlainText(r['approved'] if r['approved'] is not None else result.get('suggestion') or r['vietnamese']);self.refresh_controls()
+        self._loading_feedback=True
+        draft=self._translation_drafts.get(r['key'],{})
+        valid_draft=isinstance(draft,dict) and all(draft.get(name)==(r.get(name) or '') for name in ('english','vietnamese','context'))
+        if draft and not valid_draft:
+            self._translation_drafts.pop(r['key'],None);self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
+        self.translation.setPlainText(draft['text'] if valid_draft else r['approved'] if r['approved'] is not None else result.get('suggestion') or r['vietnamese'])
+        self._loading_feedback=False;self.refresh_controls()
+    def translation_edited(self):
+        if not self._loading_feedback and self._selected_key and self.project and not self.worker:
+            row=next((row for row in self.data if row['key']==self._selected_key),None)
+            if row is None:return
+            self._translation_drafts[self._selected_key]={name:row.get(name) or '' for name in ('english','vietnamese','context')}
+            self._translation_drafts[self._selected_key]['text']=self.translation.toPlainText()
+            self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
     def note_edited(self):
         if not self._loading_feedback and self._selected_key and not self.worker:
             self._note_drafts[self._selected_key]=self.notes.toPlainText()
@@ -364,7 +426,12 @@ class Window(QMainWindow):
             issues=technical(self.data[i]['english'],text)
             if any(x in issues for x in ['Placeholder không khớp','Thiếu bản dịch tiếng Việt']):return self.error('Chưa thể duyệt: '+', '.join(issues))
             self.project.save_notes(self.data[i]['key'],self.notes.toPlainText());self._note_drafts.pop(self.data[i]['key'],None)
-            self.project.approve(self.data[i]['key'],text);self.refresh();self.status.setText('Đã lưu bản dịch được duyệt.');self.next_row()
+            key=self.data[i]['key'];self.project.approve(key,text)
+            self._translation_drafts.pop(key,None);self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
+            self.refresh();self.status.setText('Đã lưu bản dịch được duyệt.')
+            # Filtering can already select the next visible sentence. Advance only
+            # while the just-approved sentence remains the active one.
+            if self._selected_key==key:self.next_row()
     def save_key(self):
         try:
             import keyring
@@ -428,13 +495,27 @@ class Window(QMainWindow):
 STYLE = """
 QWidget {font-family: 'Arial'; font-size: 13px; color:#24334a;}
 QWidget#root {background:#f3f6fb;}
-QLabel#title {font-size:27px;font-weight:700;color:#15253f;}
+QLabel#title {font-size:24px;font-weight:700;color:#15253f;}
 QLabel#muted {color:#6a7890;font-size:12px;}
 QLabel#badge {background:#e7edf9;color:#425c90;border-radius:12px;padding:8px 14px;}
 QFrame#card {background:white;border:1px solid #e2e8f0;border-radius:12px;}
-QLabel#number {font-size:27px;font-weight:700;color:#233e70;}
+QLabel#number {font-size:21px;font-weight:700;color:#233e70;}
 QLabel#sectionTitle {font-size:17px;font-weight:700;}
-QLabel#empty {padding:50px;color:#6a7890;font-size:15px;}
+QFrame#reviewCard {background:white;border:1px solid #cddaf0;border-radius:12px;}
+QLabel#focusTitle {font-size:17px;font-weight:700;color:#204d9b;}
+QLabel#activeKey {font-size:11px;color:#718096;}
+QTabWidget#reviewTabs::pane {border:1px solid #d9e1ed;border-radius:6px;background:#fff;}
+QTabBar::tab {background:#f0f4fb;color:#64748b;padding:7px 12px;border:0;}
+QTabBar::tab:selected {background:#e6eeff;color:#245bcc;}
+QPushButton#compact {padding:2px 9px;min-height:16px;}
+QDialog,QFileDialog {background:#f3f6fb;color:#24334a;}
+QDialog QLabel {color:#24334a;}
+QDialog QListView,QDialog QTreeView,QDialog QTableView {background:#ffffff;alternate-background-color:#f4f7fb;color:#24334a;selection-background-color:#dce7ff;selection-color:#17345c;}
+QDialog QComboBox,QDialog QLineEdit {background:#fff;color:#24334a;}
+QComboBox QAbstractItemView {background:white;color:#24334a;selection-background-color:#dce7ff;selection-color:#17345c;}
+QDialog QToolButton {background:#edf2fa;color:#24334a;border:1px solid #d6deeb;border-radius:4px;}
+
+QLabel#empty {padding:20px;color:#6a7890;font-size:15px;}
 QPushButton {background:white;border:1px solid #d6deeb;border-radius:7px;padding:9px 14px;font-weight:600;}
 QPushButton:hover {background:#edf2fd;border-color:#9ab3ec;}
 QPushButton:checked {background:#e7efff;color:#245bcc;}

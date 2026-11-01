@@ -78,3 +78,13 @@ Nút **Nhập dữ liệu** nhận CSV, JSON và Word. File JSON có thể là d
 Với Word `.docx`, đặt nội dung trong bảng với tiêu đề `key | english | vietnamese | context` (context tùy chọn), hoặc viết các khối có nhãn `Key:`, `English:`, `Vietnamese:`, `Context:`. Không tự suy đoán cách ghép cặp từ tài liệu văn xuôi không có nhãn.
 
 Word `.doc` đời cũ cần công cụ chuyển đổi có sẵn: `textutil` trên Mac hoặc LibreOffice trên máy hỗ trợ. Nếu không có, lưu tài liệu thành `.docx` trong Word rồi nhập lại. App không chỉnh file gốc; không chạy macro hay gửi tài liệu lên dịch vụ để chuyển đổi. Cả CSV/JSON/Word chỉ được nhập vào project sau khi đọc và kiểm tra cấu trúc; thao tác nhập chưa gửi nội dung đến Gemini.
+
+## Mở dữ liệu từ màn hình ban đầu
+
+**Mở project / dữ liệu** nhận project `.lqa`, hoặc CSV/JSON/Word. Nếu chọn dữ liệu thay vì project, app đọc và kiểm tra trước, sau đó yêu cầu lưu một project mới để giữ ghi chú và tiến độ. Có thể chọn hai JSON Anh–Việt cùng lúc; không chọn project `.lqa` chung với các file dữ liệu. Hủy bước lưu hoặc dữ liệu lỗi sẽ giữ nguyên project đang làm.
+
+## Câu đang review
+
+Danh sách câu nằm bên trái, vùng làm việc chính hiển thị câu đang chọn ở giữa cùng vị trí và trạng thái review. Câu nguồn và bản Việt được đối chiếu cạnh nhau; bản sửa, ghi chú và nút duyệt luôn ở vùng làm việc chính. Nhận xét và so sánh local–Gemini ở các tab riêng. Khi chuyển câu, danh sách tự giữ dòng đang chọn trong tầm nhìn.
+
+Bản sửa đang gõ được lưu nháp riêng theo nội dung nguồn. Tick review hoặc lưu ghi chú không tự duyệt bản nháp; dữ liệu train vẫn chỉ lấy bản sửa được duyệt. Khi câu nguồn đổi, bản nháp cũ không được tái sử dụng.
