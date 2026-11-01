@@ -44,7 +44,7 @@ Cache gắn với model, phiên bản prompt, ngữ cảnh và nội dung câu. 
 
 Tạo repo private và chỉ đưa code, requirements, tests, samples, workflow và README lên. `.gitignore` loại APK, dữ liệu đã trích, project và môi trường Python. Không lưu API key vào code hoặc GitHub.
 
-Trong GitHub Actions, chạy **Build desktop apps** để tạo hai artifact. Giải nén và giữ nguyên toàn bộ thư mục bản Windows, chạy `LocalizationQA.exe`; Mac dùng `LocalizationQA.app`. macOS runner `macos-14` tạo bản Apple Silicon phù hợp máy M5; máy Mac Intel cần job riêng. Bản build chưa ký / notarize nên hệ điều hành có thể hiển thị cảnh báo nguồn phát hành. Chưa có bộ cài DMG/MSI.
+Trong GitHub Actions, chạy **Build desktop apps** để tạo hai artifact. Giải nén và giữ nguyên toàn bộ thư mục bản Windows, chạy `LocalizationQA.exe`; Mac dùng `LocalizationQA.app`. macOS runner `macos-15` tạo bản Apple Silicon phù hợp máy M5; máy Mac Intel cần job riêng. Bản build chưa ký / notarize nên hệ điều hành có thể hiển thị cảnh báo nguồn phát hành. Chưa có bộ cài DMG/MSI.
 
 Có thể build trên mỗi máy:
 
