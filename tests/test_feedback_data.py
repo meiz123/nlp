@@ -28,12 +28,12 @@ class FeedbackDataTests(unittest.TestCase):
         p=Project(self.path);r=p.rows()[0]
         self.assertIsNone(r['approved']);self.assertEqual(r['notes'],'Gợi ý còn gượng')
         dest=Path(self.tmp.name)/'train.jsonl'
-        self.assertEqual(export_training(p,dest),0);self.assertEqual(dest.read_text(),'');p.close()
+        self.assertEqual(export_training(p,dest),0);self.assertEqual(dest.read_text(encoding='utf-8'),'');p.close()
     def test_training_uses_approved_target_only_and_uncheck_excludes(self):
         p=self.project();p.save_result('a',{'suggestion':'Wrong suggestion'})
         p.save_feedback('a',True,'Cần giữ tên người dùng','Xin chào %s')
         dest=Path(self.tmp.name)/'train.jsonl';self.assertEqual(export_training(p,dest),1)
-        record=json.loads(dest.read_text());self.assertEqual(record['output']['vietnamese'],'Xin chào %s')
+        record=json.loads(dest.read_text(encoding='utf-8'));self.assertEqual(record['output']['vietnamese'],'Xin chào %s')
         self.assertEqual(record['input']['vietnamese_current'],'Xin chào')
         self.assertTrue(record['metadata']['human_approved'])
         p.set_reviewed('a',False);self.assertEqual(p.rows()[0]['approved'],'Xin chào %s')
@@ -41,7 +41,7 @@ class FeedbackDataTests(unittest.TestCase):
     def test_placeholder_error_does_not_truncate_destination(self):
         p=self.project();p.approve('a','Xin chào');dest=Path(self.tmp.name)/'train.jsonl';dest.write_text('existing')
         with self.assertRaises(ValueError):export_training(p,dest)
-        self.assertEqual(dest.read_text(),'existing')
+        self.assertEqual(dest.read_text(encoding='utf-8'),'existing')
         with self.assertRaises(ValueError):export_training(p,self.path)
         p.close()
     def test_input_changes_clear_feedback_and_backend_results(self):

@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import random
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -138,6 +139,10 @@ def _digest(path: str | Path) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Keep Vietnamese CLI output readable in redirected Windows consoles.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8', errors='replace')
     parser = argparse.ArgumentParser(description='Chuẩn bị dữ liệu Anh–Việt trên máy; không gọi AI')
     commands = parser.add_subparsers(dest='command', required=True)
     pair = commands.add_parser('pair-json', help='Ghép hai JSON ngôn ngữ theo ID/đường dẫn')

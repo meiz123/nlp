@@ -42,7 +42,7 @@ class DataTests(unittest.TestCase):
             path = Path(directory) / 'pairs.csv'; write_pairs(rows, path)
             self.assertEqual(load_paired_csv(path), rows)
             self.assertEqual(main(['sample', str(path), '--count', '5', '--output', str(Path(directory)/'sample.csv')]), 0)
-            metadata = json.loads((Path(directory)/'sample.report.json').read_text())
+            metadata = json.loads((Path(directory)/'sample.report.json').read_text(encoding='utf-8'))
             self.assertEqual(metadata['sample_rows'], 5)
             self.assertEqual(len(metadata['source_sha256']), 64)
 
@@ -72,7 +72,7 @@ class DataTests(unittest.TestCase):
             (root/'en.json').write_text('{"title":"Title"}')
             (root/'vi.json').write_text('{}')
             self.assertEqual(main(['pair-json', str(root/'en.json'), str(root/'vi.json'), '--output', str(root/'out.csv'), '--strict']), 2)
-            self.assertEqual(json.loads((root/'out.report.json').read_text())['diagnostic_counts'], {'missing_vietnamese': 1})
+            self.assertEqual(json.loads((root/'out.report.json').read_text(encoding='utf-8'))['diagnostic_counts'], {'missing_vietnamese': 1})
 
 
 if __name__ == '__main__': unittest.main()

@@ -29,9 +29,9 @@ class DesktopStabilityTests(unittest.TestCase):
                 dialog.selectFile(str(path));dialog.accept()
             QTimer.singleShot(0,accept)
             selected,_=window.choose_file('Open','Project (*.lqa)')
-            self.assertEqual(Path(selected),path)
+            self.assertTrue(Path(selected).samefile(path))
             window.attach(selected)
-            self.assertEqual(window.project.path,str(path))
+            self.assertTrue(Path(window.project.path).samefile(path))
             window.close()
 
     def test_refresh_preserves_item_objects_and_selection(self):

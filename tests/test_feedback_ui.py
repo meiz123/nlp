@@ -82,7 +82,7 @@ class FeedbackUiTests(unittest.TestCase):
         output = Path(self.temp.name) / 'training.jsonl'
         self.window.choose_file = lambda *args: (str(output), 'JSON Lines (*.jsonl)')
         self.window.export_training_data()
-        self.assertEqual(output.read_text(), '')
+        self.assertEqual(output.read_text(encoding='utf-8'), '')
         self.window.translation.setPlainText('Xin chào %s')
         self.window.approve()
         self.window.export_training_data()

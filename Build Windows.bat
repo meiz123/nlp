@@ -1,4 +1,5 @@
 @echo off
+set PYTHONUTF8=1
 setlocal
 cd /d "%~dp0"
 py -3.12 -m venv .venv-build
