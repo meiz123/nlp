@@ -39,7 +39,7 @@ Mẫu được chọn sau khi sắp xếp theo key, nên cùng dữ liệu, `see
 
 Lấy mẫu ngẫu nhiên giúp thử luồng ứng dụng; không bảo đảm đủ đại diện cho mọi loại lỗi. Khi có dữ liệu chuẩn, nên thêm bộ đánh giá riêng gồm câu đúng, sai nghĩa, không tự nhiên, thuật ngữ và placeholder, kèm người duyệt xác nhận.
 
-## Kết quả kiểm tra dữ liệu APK hiện tại
+## Kết quả kiểm tra dữ liệu APK tham chiếu ban đầu
 
 Hai file `data_home_en.json` và `data_home_vi.json` có 66 tutorial mỗi file. Module ghép được **1.426 trường hiển thị Anh–Việt**, không gặp ID trùng, thiếu trường ngôn ngữ, chuỗi trống hay kiểu dữ liệu không hợp lệ trong các trường được trích. Kết quả này được kiểm tra trên dữ liệu local; chưa phải đánh giá chất lượng ngôn ngữ.
 

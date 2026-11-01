@@ -73,7 +73,7 @@ Kết quả local/Gemini và nhận xét của agent là gợi ý; không đư�
 
 ## Nhập dữ liệu JSON và Word
 
-Nút **Nhập dữ liệu** nhận CSV, JSON và Word. File JSON có thể là danh sách các object `key`, `english`, `vietnamese`, `context` (tùy chọn), hoặc bọc danh sách trong `translations`. Xem `samples/demo.json` với dữ liệu giả lập. Dùng luồng **Nhập cặp JSON Anh–Việt** cho hai file nội dung ngôn ngữ tách riêng; chọn tiếng Anh trước và tiếng Việt sau, kiểm tra cảnh báo thiếu cặp trước khi nhập.
+Nút **Nhập dữ liệu** nhận CSV, JSON và Word. File JSON có thể là danh sách các object `key`, `english`, `vietnamese`, `context` (tùy chọn), hoặc bọc danh sách trong `translations`. Xem `samples/demo.json` với dữ liệu giả lập. Với hai file nội dung ngôn ngữ tách riêng, bấm **Nhập dữ liệu**, giữ Command (Mac) hoặc Ctrl (Windows) và chọn cả hai JSON. App nhận vai trò Anh/Việt theo tên file có dấu ngôn ngữ rõ ràng như `data_home_en.json` và `data_home_vi.json`, kể cả khi chọn ngược thứ tự. Nếu tên chưa rõ, app yêu cầu bạn chọn file tiếng Anh. Nếu chỉ chọn một JSON một ngôn ngữ, app sẽ hướng dẫn chọn file còn lại. Không tự đọc file khác trong thư mục khi chưa được chọn.
 
 Với Word `.docx`, đặt nội dung trong bảng với tiêu đề `key | english | vietnamese | context` (context tùy chọn), hoặc viết các khối có nhãn `Key:`, `English:`, `Vietnamese:`, `Context:`. Không tự suy đoán cách ghép cặp từ tài liệu văn xuôi không có nhãn.
 

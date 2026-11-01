@@ -28,7 +28,7 @@ class InputUiTests(unittest.TestCase):
         self.window.close();self.temp.cleanup()
 
     def choose(self,path):
-        self.window.choose_file=lambda *args:(str(path),'')
+        self.window.choose_files=lambda *args:[str(path)]
 
     def test_json_dispatch_preserves_existing_rows_and_no_review(self):
         path=self.root/'translations.json';path.write_text(json.dumps([
@@ -41,7 +41,7 @@ class InputUiTests(unittest.TestCase):
         self.assertEqual(rows['hello']['reviewed'],0);self.assertIsNone(rows['hello']['approved'])
         self.assertEqual(rows['hello']['context'],'Greeting')
         self.assertEqual(self.window.actions[2].text(),'Nhập dữ liệu')
-        self.assertEqual(len(self.window.actions[2].menu().actions()),2)
+        self.assertIsNone(self.window.actions[2].menu())
 
     def test_parse_error_does_not_flush_notes_or_mutate_project(self):
         self.window.notes.setPlainText('Unsaved human note')
@@ -95,6 +95,6 @@ class InputUiTests(unittest.TestCase):
 
     def test_busy_input_does_not_open_file_picker(self):
         self.window.worker=object()
-        with patch.object(self.window,'choose_file') as picker:
+        with patch.object(self.window,'choose_file') as picker, patch.object(self.window,'choose_files') as multi_picker:
             self.window.import_csv();self.window.import_json_pair()
-        self.assertFalse(picker.called);self.window.worker=None
+        self.assertFalse(picker.called);self.assertFalse(multi_picker.called);self.window.worker=None

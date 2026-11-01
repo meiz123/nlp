@@ -8,10 +8,75 @@ from __future__ import annotations
 from collections import Counter
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .data import pair_json
+
+
+class SingleLanguageJSONError(ValueError):
+    """Recognized localization data that still needs the other language file."""
+
+
+class AmbiguousJSONPairError(ValueError):
+    """Both files are valid selections, but their language roles need a choice."""
+
+
+def resolve_json_pair(paths) -> tuple[Path, Path]:
+    """Resolve an explicit two-file selection by locale tokens in file names.
+
+    File contents never determine language. Ambiguous names require the UI to
+    ask for source/target roles rather than silently using selection order.
+    """
+    if isinstance(paths, (str, bytes, Path)):
+        raise ValueError('Chọn đúng hai file JSON: một tiếng Anh và một tiếng Việt')
+    selected = [Path(path) for path in paths]
+    if len(selected) != 2:
+        raise ValueError('Chọn đúng hai file JSON: một tiếng Anh và một tiếng Việt')
+    for path in selected:
+        if path.suffix.casefold() != '.json':
+            raise ValueError('Cặp ngôn ngữ phải gồm hai file .json')
+        if not path.is_file():
+            raise ValueError(f'Không tìm thấy file JSON: {path.name}')
+    if selected[0].resolve() == selected[1].resolve() or selected[0].samefile(selected[1]):
+        raise ValueError('Cần chọn hai file riêng, không chọn cùng một file cho hai ngôn ngữ')
+    roles = []
+    for path in selected:
+        tokens = set(re.findall(r'(?:^|[_.\-\s])(en|vi)(?=$|[_.\-\s])', path.stem.casefold()))
+        roles.append(next(iter(tokens)) if len(tokens) == 1 else None)
+    if set(roles) != {'en', 'vi'}:
+        raise AmbiguousJSONPairError(
+            'Chưa xác định được ngôn ngữ từ tên file. Chọn rõ file tiếng Anh và file tiếng Việt; '
+            'ví dụ đặt tên data_home_en.json và data_home_vi.json.')
+    return selected[roles.index('en')], selected[roles.index('vi')]
+
+
+def _is_single_language_document(document):
+    if not isinstance(document, dict) or not document:
+        return False
+    paired_fields = {'key', 'english', 'vietnamese', 'context', 'translations', 'en', 'vi'}
+    if not (set(document) & paired_fields) and all(isinstance(value, str) for value in document.values()):
+        return True
+    # A partially specified bilingual record is malformed paired data, not a
+    # reason to route the user into choosing another language file.
+    def has_paired_marker(value):
+        if isinstance(value, dict):
+            return bool(set(value) & {'english', 'vietnamese'}) or any(has_paired_marker(v) for v in value.values())
+        if isinstance(value, list):
+            return any(has_paired_marker(v) for v in value)
+        return False
+    if set(document) & paired_fields or has_paired_marker(document):
+        return False
+    def has_display_text(value):
+        if isinstance(value, dict):
+            return any((key in {'title', 'name', 'categoryLabel', 'description'} and isinstance(child, str))
+                       or (isinstance(child, (dict, list)) and has_display_text(child))
+                       for key, child in value.items())
+        if isinstance(value, list):
+            return any(has_display_text(child) for child in value)
+        return False
+    return has_display_text(document)
 
 
 def _unique_object(pairs):
@@ -139,6 +204,10 @@ def load_json(path: str | Path) -> tuple[list[dict[str, str]], dict[str, Any]]:
         rows, diagnostics = _language_maps(document.get('en', {}), document.get('vi', {}))
         name = 'language_maps'
     elif isinstance(document, dict):
+        if _is_single_language_document(document):
+            raise SingleLanguageJSONError(
+                'File JSON này chứa một ngôn ngữ. Chọn thêm file ngôn ngữ còn lại để ghép cặp Anh–Việt; '
+                'bạn có thể chọn cả data_home_en.json và data_home_vi.json cùng lúc.')
         rows, diagnostics = _records(document, mapping=True)
         name = 'paired_record_mapping'
     else:
@@ -153,8 +222,11 @@ def load_json_pair(english_path: str | Path, vietnamese_path: str | Path
     The argument order is explicit. The importer does not guess which file is
     English. Asset object IDs are preferred; unkeyed steps remain positional.
     """
-    english, en_hash = _read(english_path)
-    vietnamese, vi_hash = _read(vietnamese_path)
+    source, target = Path(english_path), Path(vietnamese_path)
+    if source.resolve() == target.resolve() or (source.exists() and target.exists() and source.samefile(target)):
+        raise ValueError('Cần chọn hai file riêng, không chọn cùng một file cho hai ngôn ngữ')
+    english, en_hash = _read(source)
+    vietnamese, vi_hash = _read(target)
     flat = (isinstance(english, dict) and isinstance(vietnamese, dict)
             and all(isinstance(v, str) for v in english.values())
             and all(isinstance(v, str) for v in vietnamese.values()))

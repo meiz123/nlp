@@ -65,12 +65,7 @@ class Window(QMainWindow):
         bar=QHBoxLayout();layout.addLayout(bar);self.actions=[]
         for label,fn in [('＋ Tạo project',self.new),('Mở project',self.open),('Nhập dữ liệu',self.import_csv),('Xuất báo cáo',self.export),('Xuất dữ liệu train',self.export_training_data),('Nhập bảng so sánh',self.import_comparison_csv)]:
             b=QPushButton(label)
-            if label=='Nhập dữ liệu':
-                menu=QMenu(b)
-                menu.addAction('Một file CSV / JSON / Word',self.import_csv)
-                menu.addAction('Cặp JSON Anh–Việt',self.import_json_pair)
-                b.setMenu(menu)
-            else:b.clicked.connect(fn)
+            b.clicked.connect(fn)
             bar.addWidget(b);self.actions.append(b)
         bar.addStretch();step=QLabel('01  Nhập dữ liệu    →    02  Kiểm tra    →    03  Duyệt & xuất');step.setObjectName('muted');bar.addWidget(step)
         self.settings=QFrame();self.settings.setObjectName('card');cfg=QVBoxLayout(self.settings);cfg.setContentsMargins(18,14,18,14);cfg.setSpacing(10)
@@ -100,7 +95,7 @@ class Window(QMainWindow):
         self.stopbutton=QPushButton('Dừng');self.stopbutton.clicked.connect(self.stop);self.stopbutton.setEnabled(False);filters.addWidget(self.stopbutton)
         splitter=QSplitter(Qt.Orientation.Horizontal);layout.addWidget(splitter,1)
         left=QFrame();left.setObjectName('card');leftbox=QVBoxLayout(left);leftbox.setContentsMargins(0,0,0,0)
-        self.empty=QLabel('Bắt đầu với một project mới\n\nNhập CSV, JSON hoặc Word có cặp câu Anh–Việt.\nDùng menu Nhập dữ liệu để chọn một file hoặc cặp JSON.\nKết quả được lưu để tiếp tục trên Mac hoặc Windows.');self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);self.empty.setObjectName('empty');leftbox.addWidget(self.empty)
+        self.empty=QLabel('Bắt đầu với một project mới\n\nNhập CSV, JSON hoặc Word có cặp câu Anh–Việt.\nChọn cả hai file JSON Anh và Việt cùng lúc trong Nhập dữ liệu.\nKết quả được lưu để tiếp tục trên Mac hoặc Windows.');self.empty.setAlignment(Qt.AlignmentFlag.AlignCenter);self.empty.setObjectName('empty');leftbox.addWidget(self.empty)
         self.table=QTableWidget(0,8);self.table.setHorizontalHeaderLabels(['Key','Tiếng Anh','Tiếng Việt','Đánh giá','Đã review','Ghi chú','Local','Gemini']);self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers);self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows);self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection);self.table.setAlternatingRowColors(True);self.table.setShowGrid(False);self.table.verticalHeader().hide();self.table.verticalHeader().setDefaultSectionSize(54)
         self.table.itemSelectionChanged.connect(self.select);self.table.itemChanged.connect(self.table_feedback_changed);self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive);self.table.horizontalHeader().setStretchLastSection(True);leftbox.addWidget(self.table);splitter.addWidget(left)
         panel=QFrame();panel.setObjectName('card');right=QVBoxLayout(panel);right.setContentsMargins(18,16,18,16);right.setSpacing(10)
@@ -175,6 +170,16 @@ class Window(QMainWindow):
         self.file_dialogs.append(dialog)
         if dialog.exec():return dialog.selectedFiles()[0],dialog.selectedNameFilter()
         return '', ''
+    def choose_files(self,title,filters):
+        """Select a single paired document or two separate JSON language files."""
+        dialog=QFileDialog(self,title);dialog.setNameFilters(filters.split(';;'))
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog,True)
+        dialog.setViewMode(QFileDialog.ViewMode.List)
+        filename=dialog.findChild(QLineEdit,'fileNameEdit')
+        if filename is not None:filename.setCompleter(None)
+        dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)
+        self.file_dialogs.append(dialog)
+        return dialog.selectedFiles() if dialog.exec() else []
     def new(self):
         path,_=self.choose_file('Tạo project','Project (*.lqa)',True)
         if path:self.attach(path if path.endswith('.lqa') else path+'.lqa')
@@ -201,23 +206,62 @@ class Window(QMainWindow):
         count=len((report or {}).get('diagnostics',[]))
         self.status.setText(f'Đã nhập {len(rows)} cặp câu'+(f' • {count} cảnh báo dữ liệu' if count else '')+'. Chưa tự duyệt bản sửa nào.')
         return True
-    def import_csv(self):
-        """Retain the original callback name while supporting all input formats."""
-        if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
-        path,_=self.choose_file('Nhập dữ liệu Anh–Việt',
-            'Dữ liệu (*.csv *.json *.docx *.doc);;CSV (*.csv);;JSON (*.json);;Word (*.docx *.doc)')
-        if not path:return
-        try:
-            suffix=__import__('pathlib').Path(path).suffix.lower();report={}
+    def choose_json_roles(self, paths):
+        """Resolve filename roles, or ask explicitly when names are ambiguous."""
+        from pathlib import Path
+        from .input_json import resolve_json_pair, AmbiguousJSONPairError
+        try:return resolve_json_pair(paths)
+        except AmbiguousJSONPairError:
+            choices=[str(Path(path)) for path in paths]
+            selected,accepted=QInputDialog.getItem(self,'Chọn file nguồn tiếng Anh',
+                'Tên file chưa chỉ rõ ngôn ngữ. Chọn file tiếng Anh; file còn lại sẽ là tiếng Việt:',
+                choices,0,False)
+            if not accepted:return None
+            index=choices.index(selected)
+            return Path(paths[index]),Path(paths[1-index])
+    def import_selected_paths(self, paths):
+        """Finish parsing and role selection before any project write."""
+        from pathlib import Path
+        from .input_json import load_json,load_json_pair,SingleLanguageJSONError
+        if not paths:return False
+        if len(paths)>2:raise ValueError('Chọn một file CSV/Word/JSON song ngữ hoặc đúng hai file JSON Anh–Việt.')
+        paths=[Path(path) for path in paths];report={}
+        if len(paths)==2:
+            if any(path.suffix.lower()!='.json' for path in paths):
+                raise ValueError('Chỉ chọn nhiều file khi nhập hai JSON Anh–Việt. CSV và Word cần chọn từng file.')
+            roles=self.choose_json_roles(paths)
+            if roles is None:
+                self.status.setText('Đã hủy chọn ngôn ngữ. Project hiện tại được giữ nguyên.');return False
+            rows,report=load_json_pair(*roles);sources=list(roles)
+        else:
+            path=paths[0];suffix=path.suffix.lower();sources=[path]
             if suffix=='.csv':rows=load_csv(path)
             elif suffix=='.json':
-                from .input_json import load_json
-                rows,report=load_json(path)
+                try:rows,report=load_json(path)
+                except SingleLanguageJSONError:
+                    counterpart,_=self.choose_file('JSON này chứa một ngôn ngữ • Chọn file JSON ngôn ngữ còn lại','JSON (*.json)')
+                    if not counterpart:
+                        self.status.setText('Đã hủy nhập cặp JSON. Chọn cả file Anh và Việt để nhập.');return False
+                    roles=self.choose_json_roles([path,Path(counterpart)])
+                    if roles is None:
+                        self.status.setText('Đã hủy chọn ngôn ngữ. Project hiện tại được giữ nguyên.');return False
+                    rows,report=load_json_pair(*roles);sources=list(roles)
             elif suffix in ('.docx','.doc'):
                 from .input_word import load_word
-                rows=load_word(path)
-            else:raise ValueError('Chọn file CSV, JSON, DOCX hoặc DOC. JSON một ngôn ngữ cần dùng menu Cặp JSON Anh–Việt.')
-            self.apply_input_rows(rows,report)
+                rows=load_word(str(path))
+            else:raise ValueError('Chọn CSV, JSON, DOCX hoặc DOC. Có thể chọn cùng lúc hai JSON Anh–Việt.')
+        imported=self.apply_input_rows(rows,report)
+        if imported:
+            self.status.setText(self.status.text()+' Nguồn: '+' + '.join(path.name for path in sources))
+            self.status.setToolTip('\n'.join(str(path) for path in sources))
+        return imported
+    def import_csv(self):
+        """Retain the callback name; the primary input now accepts one or two files."""
+        if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
+        paths=self.choose_files('Chọn dữ liệu • Có thể chọn cùng lúc hai JSON Anh–Việt',
+            'Dữ liệu (*.csv *.json *.docx *.doc);;JSON Anh–Việt (*.json);;CSV (*.csv);;Word (*.docx *.doc)')
+        if not paths:return
+        try:self.import_selected_paths(paths)
         except Exception as e:self.error(e)
     def import_json_pair(self):
         if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
