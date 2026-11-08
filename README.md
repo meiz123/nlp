@@ -88,3 +88,11 @@ Word `.doc` đời cũ cần công cụ chuyển đổi có sẵn: `textutil` tr
 Danh sách câu nằm bên trái, vùng làm việc chính hiển thị câu đang chọn ở giữa cùng vị trí và trạng thái review. Câu nguồn và bản Việt được đối chiếu cạnh nhau; bản sửa, ghi chú và nút duyệt luôn ở vùng làm việc chính. Nhận xét và so sánh local–Gemini ở các tab riêng. Khi chuyển câu, danh sách tự giữ dòng đang chọn trong tầm nhìn.
 
 Bản sửa đang gõ được lưu nháp riêng theo nội dung nguồn. Tick review hoặc lưu ghi chú không tự duyệt bản nháp; dữ liệu train vẫn chỉ lấy bản sửa được duyệt. Khi câu nguồn đổi, bản nháp cũ không được tái sử dụng.
+
+## Model dự phòng
+
+Trong Cấu hình Gemini, ô Model dự phòng nhận tối đa ba tên model, cách nhau bằng dấu phẩy. Gợi ý mặc định là `gemini-2.5-flash`; để trống để tắt. Mỗi model phải hỗ trợ structured output và có quyền truy cập/hạn mức trên cùng tài khoản. Không tự bật thanh toán; chi phí vẫn theo cấu hình tài khoản Google.
+
+Khi gặp 429, 404, lỗi dịch vụ 500/502/503/504, lỗi kết nối hoặc kết quả không hợp lệ, app chuyển sang model dự phòng tiếp theo. Model lỗi được bỏ qua trong lần chạy hiện tại. Khi hết lựa chọn, lỗi tạm thời được thử lại tối đa ba lần tổng cộng trên model cuối trước khi dừng và giữ tiến độ. Lỗi key/quyền/yêu cầu 400/401/403 dừng ngay. Bấm Kiểm tra / Tiếp tục bắt đầu lần chạy mới và có thể thử lại model chính.
+
+Các model dùng cùng prompt, ngữ cảnh và schema; đề xuất làm mất/thay đổi placeholder bị từ chối. Cache tách theo model và ngữ cảnh. Tab nhận xét và báo cáo ghi `model_used`, `used_fallback`; kết quả dự phòng không tự được duyệt hoặc đưa vào train. Cơ chế này bảo vệ cấu trúc và tiến độ, không bảo đảm các model có chất lượng ngôn ngữ tương đương; cần review và đánh giá bằng dữ liệu chuẩn.

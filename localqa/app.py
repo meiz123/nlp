@@ -4,14 +4,16 @@ from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBo
 from PySide6.QtGui import QColor
 from .core import Project,load_csv,technical,fingerprint,export_rows,export_training
 
+from .routing import ReviewRouter, ReviewCancelled, ModelsUnavailable, model_chain, DEFAULT_FALLBACKS
+
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 
 class Worker(QThread):
     progress=Signal(str)
     updated=Signal(int,int)
     failed=Signal(str)
-    def __init__(self,path,key,model,context,offline):
-        super().__init__();self.args=(path,key,model,context,offline);self.stop=threading.Event()
+    def __init__(self,path,key,model,context,offline,fallbacks=()):
+        super().__init__();self.args=(path,key,model,context,offline);self.stop=threading.Event();self.fallbacks=fallbacks
     def run(self):
         p=None;client=None
         try:
@@ -19,6 +21,7 @@ class Worker(QThread):
             if not offline:
                 from .gemini import Gemini
                 client=Gemini(key)
+                router=ReviewRouter(client,p,model_chain(model,self.fallbacks),context,self.stop,self.progress.emit)
             pending=[r for r in p.rows() if not r['reviewed']]
             self.updated.emit(0,len(pending))
             for index,row in enumerate(pending):
@@ -28,20 +31,15 @@ class Worker(QThread):
                 if offline:
                     result={'status':'REVIEW','issues':issues,'reason':'Chỉ kiểm tra kỹ thuật; chưa đánh giá ngôn ngữ.','suggestion':''}
                 else:
-                    h=fingerprint(row,model,context);result=p.cached(h)
-                    if result is None:
-                        for attempt in range(3):
-                            try:result=client.review(row,model,context);break
-                            except Exception as exc:
-                                code=getattr(exc,'code',None)
-                                if str(code) not in ['429','500','502','503','504'] or attempt==2:raise
-                                self.progress.emit(f'Dịch vụ bận ({code}); thử lại sau {15*(attempt+1)} giây…')
-                                if self.stop.wait(15*(attempt+1)):return
-                        p.cache(h,result)
+                    result=router.review(row)
                     if issues:result={**result,'status':'FAIL' if result['status']=='FAIL' or 'Placeholder không khớp' in issues or 'Thiếu bản dịch tiếng Việt' in issues else 'REVIEW','issues':issues+result['issues']}
                     if self.stop.is_set():break
                 p.save_result(row['key'],result);self.progress.emit('Đã lưu: '+row['key']);self.updated.emit(index+1,len(pending))
                 if not offline and index+1<len(pending) and self.stop.wait(5):break
+        except ReviewCancelled:
+            pass
+        except ModelsUnavailable as exc:
+            self.failed.emit(str(exc)+'. Đã giữ tiến độ; có thể review thủ công hoặc tiếp tục sau.')
         except Exception as exc:
             code=getattr(exc,'code',None)
             messages={'404':'Không tìm thấy model. Chọn model khác trong Cấu hình.', '429':'Đã chạm giới hạn lượt gọi. Thử lại sau hoặc kiểm tra hạn mức trong AI Studio.', '504':'Gemini phản hồi quá lâu. Thử lại sau hoặc đổi model.', '403':'Key chưa có quyền truy cập. Kiểm tra key và project trong AI Studio.', '400':'Yêu cầu không hợp lệ. Kiểm tra key, model và dữ liệu.'}
@@ -76,6 +74,10 @@ class Window(QMainWindow):
             b=QPushButton(label);b.clicked.connect(fn);line.addWidget(b)
         line.addWidget(QLabel('Model'))
         self.model=QLineEdit(DEFAULT_MODEL);self.model.setMinimumWidth(230);line.addWidget(self.model)
+        fallbackline=QHBoxLayout();fallbackline.addWidget(QLabel('Model dự phòng'))
+        self.fallback_models=QLineEdit(DEFAULT_FALLBACKS);self.fallback_models.setPlaceholderText('Tên model, cách nhau bằng dấu phẩy; để trống để tắt')
+        fallbackline.addWidget(self.fallback_models,1);cfg.addLayout(fallbackline)
+        fallbacknote=QLabel('Tự chuyển khi hết lượt, dịch vụ lỗi hoặc kết quả không hợp lệ. Tối đa 3 model dự phòng; cùng API key và tài khoản. Hạn mức và chi phí theo từng model.');fallbacknote.setWordWrap(True);fallbacknote.setObjectName('muted');cfg.addWidget(fallbacknote)
         self.context=QPlainTextEdit();self.context.setPlaceholderText('Ngữ cảnh và thuật ngữ • Ví dụ: App gấp giấy cho người mới. unfold = mở nếp gấp. Giọng văn ngắn gọn, thân thiện.');self.context.setFixedHeight(65);cfg.addWidget(self.context)
         note=QLabel('Key lưu trong kho bảo mật của máy. Khi dùng AI, câu dịch và ngữ cảnh được gửi đến Google; hạn mức theo tài khoản.');note.setWordWrap(True);note.setObjectName('muted');cfg.addWidget(note)
         try:
@@ -169,9 +171,9 @@ class Window(QMainWindow):
             p=Project(path)
             if self.project:
                 self._flush_note_drafts()
-                self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.close()
+                self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.set_setting('fallback_models',self.fallback_models.text());self.project.close()
             self._selected_key=None;self._note_drafts.clear()
-            self.project=p;self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path);return True
+            self.project=p;self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.fallback_models.setText(p.setting('fallback_models',DEFAULT_FALLBACKS));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path);return True
         except Exception as e:self.error(e);return False
     def choose_file(self,title,filters,save=False):
         dialog=QFileDialog(self,title);dialog.setNameFilters(filters.split(';;'))
@@ -383,7 +385,8 @@ class Window(QMainWindow):
         message='\n'.join('• '+issue for issue in result.get('issues',[]))
         if comparison:
             message+='\nSo sánh: '+comparison.get('reason','')+'\nCần thêm ngữ cảnh: '+comparison.get('context_needed','')
-        self.detail.setPlainText(message+'\n'+result.get('reason','Chưa có đánh giá QA riêng; đang xem kết quả so sánh.' if comparison else 'Chưa kiểm tra. Bạn có thể tự review hoặc bắt đầu kiểm tra AI.')+'\n\nNgữ cảnh: '+(r['context'] or 'Chưa cung cấp'))
+        provenance=('Model xử lý: '+result['model_used']+(' (dự phòng)' if result.get('used_fallback') else '')+'\n') if result.get('model_used') else ''
+        self.detail.setPlainText(provenance+message+'\n'+result.get('reason','Chưa có đánh giá QA riêng; đang xem kết quả so sánh.' if comparison else 'Chưa kiểm tra. Bạn có thể tự review hoặc bắt đầu kiểm tra AI.')+'\n\nNgữ cảnh: '+(r['context'] or 'Chưa cung cấp'))
         self._loading_feedback=True
         draft=self._translation_drafts.get(r['key'],{})
         valid_draft=isinstance(draft,dict) and all(draft.get(name)==(r.get(name) or '') for name in ('english','vietnamese','context'))
@@ -444,7 +447,7 @@ class Window(QMainWindow):
             self.key.clear()
         except Exception:self.error('Không xóa được key trong kho bảo mật')
     def busy(self,on):
-        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.offline]:w.setEnabled(not on)
+        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline]:w.setEnabled(not on)
         self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):
@@ -460,9 +463,12 @@ class Window(QMainWindow):
         if not self.project:return self.error('Tạo hoặc mở project trước')
         if not self.offline.isChecked() and not self.key.text().strip():return self.error('Nhập Gemini API key hoặc chọn kiểm tra kỹ thuật')
         if not self.model.text().strip():return self.error('Nhập tên model')
+        try:model_chain(self.model.text(),self.fallback_models.text())
+        except ValueError as exc:return self.error(exc)
+        self.project.set_setting('fallback_models',self.fallback_models.text())
         self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text().strip())
         self.last_error=''
-        self.worker=Worker(self.project.path,self.key.text().strip(),self.model.text().strip(),self.context.toPlainText(),self.offline.isChecked());self.worker.progress.connect(self.status.setText);self.worker.failed.connect(self.run_error);self.worker.updated.connect(self.on_progress);self.worker.finished.connect(self.finished);self.busy(True);self.worker.start()
+        self.worker=Worker(self.project.path,self.key.text().strip(),self.model.text().strip(),self.context.toPlainText(),self.offline.isChecked(),self.fallback_models.text());self.worker.progress.connect(self.status.setText);self.worker.failed.connect(self.run_error);self.worker.updated.connect(self.on_progress);self.worker.finished.connect(self.finished);self.busy(True);self.worker.start()
     def stop(self):
         if self.worker:self.worker.stop.set();self.status.setText('Đang dừng; chờ yêu cầu hiện tại hoàn tất…')
     def run_error(self,message):
@@ -489,7 +495,7 @@ class Window(QMainWindow):
         if self.worker and self.worker.isRunning():self.stop();self.error('Đang dừng kiểm tra. Hãy đóng lại khi đã lưu tiến độ.');event.ignore();return
         if self.project:
             self._flush_note_drafts()
-            self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.close()
+            self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.set_setting('fallback_models',self.fallback_models.text());self.project.close()
         event.accept()
 
 STYLE = """

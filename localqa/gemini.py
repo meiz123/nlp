@@ -33,14 +33,18 @@ Trả lý do và danh sách lỗi bằng tiếng Việt. Mỗi lỗi phải dự
 _INVALID = 'Gemini trả kết quả không hợp lệ; tiến độ trước đó đã được lưu'
 
 
+class ReviewValidationError(ValueError):
+    pass
+
+
 def parse_review(text):
     """Validate even structured output before any result is stored in a project."""
     try:
         result = json.loads(text or '')
     except (json.JSONDecodeError, TypeError) as exc:
-        raise ValueError(_INVALID) from exc
+        raise ReviewValidationError(_INVALID) from exc
     if not isinstance(result, dict) or set(result) != set(SCHEMA['required']):
-        raise ValueError(_INVALID)
+        raise ReviewValidationError(_INVALID)
     if (
         result['status'] not in ('PASS', 'REVIEW', 'FAIL')
         or not isinstance(result['issues'], list)
@@ -49,11 +53,11 @@ def parse_review(text):
         or not result['reason'].strip()
         or not isinstance(result['suggestion'], str)
     ):
-        raise ValueError(_INVALID)
+        raise ReviewValidationError(_INVALID)
     if result['status'] == 'PASS' and (result['issues'] or result['suggestion'].strip()):
-        raise ValueError(_INVALID)
+        raise ReviewValidationError(_INVALID)
     if result['status'] != 'PASS' and not result['issues']:
-        raise ValueError(_INVALID)
+        raise ReviewValidationError(_INVALID)
     return result
 
 

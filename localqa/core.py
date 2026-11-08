@@ -114,11 +114,11 @@ def fingerprint(row,model,context):
     return hashlib.sha256(json.dumps([PROMPT_VERSION,model,context,row['english'],row['vietnamese'],row['context']],ensure_ascii=False).encode()).hexdigest()
 
 def export_rows(project,path):
-    fields=['key','english','vietnamese','context','status','issues','reason','suggestion','approved_translation','reviewed','notes']
+    fields=['key','english','vietnamese','context','status','issues','reason','suggestion','approved_translation','reviewed','notes','model_used','used_fallback']
     rows=[]
     for r in project.rows():
         result=json.loads(r['result']) if r['result'] else {}
-        rows.append([r['key'],r['english'],r['vietnamese'],r['context'],result.get('status','Chưa kiểm tra'),' | '.join(result.get('issues',[])),result.get('reason',''),result.get('suggestion',''),r['approved'] or '',bool(r['reviewed']),r['notes']])
+        rows.append([r['key'],r['english'],r['vietnamese'],r['context'],result.get('status','Chưa kiểm tra'),' | '.join(result.get('issues',[])),result.get('reason',''),result.get('suggestion',''),r['approved'] or '',bool(r['reviewed']),r['notes'],result.get('model_used',''),result.get('used_fallback','')])
     if Path(path).suffix.lower()=='.xlsx':
         from openpyxl import Workbook
         w=Workbook();s=w.active;s.title='Localization QA';s.append(fields)
