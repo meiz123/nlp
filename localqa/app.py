@@ -143,6 +143,7 @@ class Window(QMainWindow):
         footer=QHBoxLayout();layout.addLayout(footer);self.status=QLabel('Sẵn sàng • Tạo hoặc mở project để bắt đầu.');self.status.setWordWrap(True);footer.addWidget(self.status,1)
         self.progressbar=QProgressBar();self.progressbar.setRange(0,1);self.progressbar.setValue(0);self.progressbar.setFixedWidth(220);self.progressbar.setFormat('%v / %m câu');footer.addWidget(self.progressbar)
         self.setStyleSheet(STYLE)
+        self.manual_mode.setChecked(True)
         self.refresh_controls()
     def refresh_controls(self):
         has=bool(self.project);running=bool(self.worker)
@@ -424,6 +425,7 @@ class Window(QMainWindow):
         self._loading_feedback=False
         if not checked:self.select()
         self.refresh_controls()
+        if checked:self.source.setFocus()
 
     def source_edited(self):
         if self._loading_feedback or not self.manual_mode.isChecked():return

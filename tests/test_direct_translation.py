@@ -23,6 +23,13 @@ class DirectTests(unittest.TestCase):
     def ready(self):
         row={'key':'direct','english':'Save {count} items','vietnamese':'','context':''}
         self.w._translation_request=(True,row);self.w.translation_ready(dict(RESULT));self.w.refresh_controls()
+    def test_fresh_app_allows_typing_without_project_or_extra_toggle(self):
+        self.assertTrue(self.w.manual_mode.isChecked())
+        self.assertFalse(self.w.source.isReadOnly())
+        self.w.source.setPlainText('Hello')
+        self.assertEqual(self.w.source.toPlainText(),'Hello')
+        self.assertTrue(self.w.translatebutton.isEnabled())
+
     def test_direct_without_project_and_no_auto_approval(self):
         self.w.manual_mode.setChecked(True);self.w.source.setPlainText('Save {count} items');self.ready()
         self.assertFalse(self.w.source.isReadOnly());self.assertEqual(self.w.current.toPlainText(),'Lưu {count} mục')
