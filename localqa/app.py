@@ -120,10 +120,13 @@ class Window(QMainWindow):
         self.pastebutton=QPushButton('Dán');self.pastebutton.setToolTip('Dán văn bản từ clipboard • Cmd+V hoặc Ctrl+V');self.pastebutton.clicked.connect(self.paste_source);entrybar.addWidget(self.pastebutton)
         self.translatebutton=QPushButton('Dịch sang tiếng Việt');self.translatebutton.clicked.connect(self.translate_source);entrybar.addWidget(self.translatebutton)
         self.save_sentence=QPushButton('Lưu câu vào project');self.save_sentence.clicked.connect(self.save_manual_sentence);entrybar.addWidget(self.save_sentence);entrybar.addStretch();right.addLayout(entrybar)
-        sourcebar=QHBoxLayout();sourcebar.setSpacing(12);right.addLayout(sourcebar,2)
+        sourcearea=QWidget();sourcearea.setMinimumHeight(125);sourcebar=QHBoxLayout(sourcearea);sourcebar.setContentsMargins(0,0,0,0);sourcebar.setSpacing(12);right.addWidget(sourcearea,3)
         for label,fieldname in [('TIẾNG ANH','source'),('BẢN DỊCH HIỆN TẠI','current')]:
             box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(label))
-            field=SourceTextEdit() if fieldname=='source' else QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1);sourcebar.addLayout(box)
+            field=SourceTextEdit() if fieldname=='source' else QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1)
+            if fieldname=='source':
+                self.translatebelow=QPushButton('Dịch bằng model');self.translatebelow.setObjectName('primary');self.translatebelow.clicked.connect(self.translate_source);box.addWidget(self.translatebelow)
+            sourcebar.addLayout(box)
         self.source.setPlaceholderText('Nhập hoặc dán câu tiếng Anh tại đây, rồi bấm Dịch sang tiếng Việt');self.source.textChanged.connect(self.source_edited)
         self.reviewtabs=QTabWidget();self.reviewtabs.setObjectName('reviewTabs');self.reviewtabs.setMinimumHeight(100);right.addWidget(self.reviewtabs,3)
         self.detail=QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMinimumHeight(50);self.reviewtabs.addTab(self.detail,'Nhận xét & ngữ cảnh')
@@ -149,11 +152,14 @@ class Window(QMainWindow):
         self.refresh_controls()
     def refresh_controls(self):
         has=bool(self.project);running=bool(self.worker)
-        for w in self.actions[2:]+[self.runbutton]:w.setEnabled(has and not running)
+        for w in self.actions:w.setEnabled(not running)
+        self.runbutton.setEnabled(not running and (has or self.manual_mode.isChecked()))
         manual=self.manual_mode.isChecked()
         self.pastebutton.setEnabled(manual and not running)
         self.source.setReadOnly(running or not manual);self.manual_mode.setEnabled(not running)
         self.translatebutton.setEnabled(not running and (manual or bool(self._selected_key)))
+        self.translatebelow.setEnabled(self.translatebutton.isEnabled())
+        self.translatebelow.setText('Đang dịch…' if running else 'Dịch bằng model')
         self.save_sentence.setVisible(manual);self.save_sentence.setEnabled(manual and not running and self._manual_result is not None)
         selected=not manual and 0<=self.table.currentRow()<len(self.data)
         self.approvebutton.setEnabled(selected and not running);self.translation.setReadOnly(running or not (selected or manual));self.nextbutton.setEnabled(selected and not running)
@@ -319,11 +325,11 @@ class Window(QMainWindow):
         return imported
     def import_csv(self):
         """Retain the callback name; the primary input now accepts one or two files."""
-        if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
+        if self.worker:return self.error('Dừng kiểm tra trước khi nhập dữ liệu')
         paths=self.choose_files('Chọn dữ liệu • Có thể chọn cùng lúc hai JSON Anh–Việt',
             'Dữ liệu (*.csv *.json *.xlsx *.xls *.docx *.doc);;JSON Anh–Việt (*.json);;CSV (*.csv);;Excel (*.xlsx *.xls);;Word (*.docx *.doc)')
         if not paths:return
-        try:self.import_selected_paths(paths)
+        try:self.import_selected_paths(paths,create_project=not bool(self.project))
         except Exception as e:self.error(e)
     def import_json_pair(self):
         if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
@@ -339,11 +345,13 @@ class Window(QMainWindow):
             self.apply_input_rows(rows,report)
         except Exception as e:self.error(e)
     def import_comparison_csv(self):
-        if not self.project or self.worker:return self.error('Tạo hoặc mở project trước')
+        if self.worker:return self.error('Dừng kiểm tra trước khi nhập bảng so sánh')
         path,_=self.choose_file('Nhập bảng so sánh Local–Gemini','CSV (*.csv)')
         if path:
             try:
-                from .comparison import import_comparison
+                from .comparison import import_comparison,load_comparison_csv
+                load_comparison_csv(path)
+                if not self.project and not self.create_input_project():return
                 self._flush_note_drafts();count=import_comparison(self.project,path);self._note_drafts.clear();self.refresh();self.status.setText(f'Đã nhập {count} câu so sánh. Chưa tự duyệt bản sửa nào.')
             except Exception as e:self.error(e)
     def refresh(self):
@@ -443,7 +451,9 @@ class Window(QMainWindow):
         if self.worker:return
         english=self.source.toPlainText()
         if not english.strip():return self.error('Nhập câu tiếng Anh trước khi dịch')
-        if not self.key.text().strip():return self.error('Nhập API key trong Cấu hình Gemini để dịch')
+        if not self.key.text().strip():
+            self.configbutton.setChecked(True);self.key.setFocus()
+            return self.error('Nhập API key trong Cấu hình Gemini để dịch')
         try:model_chain(self.model.text(),self.fallback_models.text())
         except ValueError as exc:return self.error(exc)
         manual=self.manual_mode.isChecked()
@@ -546,7 +556,7 @@ class Window(QMainWindow):
         except Exception:self.error('Không xóa được key trong kho bảo mật')
     def busy(self,on):
         self.table.setEnabled(not on)
-        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.pastebutton,self.translatebutton,self.save_sentence]:w.setEnabled(not on)
+        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.pastebutton,self.translatebutton,self.translatebelow,self.save_sentence]:w.setEnabled(not on)
         self.source.setReadOnly(on or not self.manual_mode.isChecked());self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):
@@ -576,14 +586,19 @@ class Window(QMainWindow):
     def finished(self):
         self.worker=None;self.busy(False);self.refresh();self.status.setText(self.last_error or 'Đã lưu tiến độ. Chọn một câu để duyệt kết quả.')
     def export(self):
-        if not self.project:return
+        if self.worker:return
+        if self.manual_mode.isChecked() and self._manual_result:
+            self.save_manual_sentence()
+            if self.manual_mode.isChecked():return
+        if not self.project or not self.project.rows():return self.error('Chưa có dữ liệu để xuất. Nhập file hoặc dịch và lưu câu vào project trước.')
         path,selected=self.choose_file('Xuất báo cáo','CSV (*.csv);;Excel (*.xlsx)',True)
         if path and not __import__('pathlib').Path(path).suffix:path+='.xlsx' if 'xlsx' in selected else '.csv'
         if path:
             try:self._flush_note_drafts();export_rows(self.project,path);self.status.setText('Đã xuất: '+path)
             except Exception as e:self.error(e)
     def export_training_data(self):
-        if not self.project or self.worker:return
+        if self.worker:return
+        if not self.project:return self.error('Chưa có bản dịch đã duyệt để xuất dữ liệu train. Duyệt bản sửa trước.')
         path,_=self.choose_file('Xuất dữ liệu đã duyệt để train','JSON Lines (*.jsonl)',True)
         if path and not __import__('pathlib').Path(path).suffix:path+='.jsonl'
         if path:
@@ -627,7 +642,7 @@ QPushButton:hover {background:#edf2fd;border-color:#9ab3ec;}
 QPushButton:checked {background:#e7efff;color:#245bcc;}
 QPushButton#primary {background:#305edb;color:white;border:1px solid #305edb;}
 QPushButton#primary:hover {background:#244cbb;}
-QPushButton:disabled {background:#edf0f5;color:#99a3b3;border-color:#e3e7ed;}
+QPushButton#primary:disabled,QPushButton:disabled {background:#edf0f5;color:#99a3b3;border-color:#e3e7ed;}
 QLineEdit,QPlainTextEdit,QComboBox {background:#fff;border:1px solid #d9e1ed;border-radius:7px;padding:8px;selection-background-color:#dce7ff;selection-color:#15253f;}
 QLineEdit:focus,QPlainTextEdit:focus {border:1px solid #6388ea;}
 QPlainTextEdit:read-only {background:#f7f9fc;}
