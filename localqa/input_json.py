@@ -46,6 +46,12 @@ def resolve_json_pair(paths) -> tuple[Path, Path]:
         tokens = set(re.findall(r'(?:^|[_.\-\s])(en|vi)(?=$|[_.\-\s])', path.stem.casefold()))
         roles.append(next(iter(tokens)) if len(tokens) == 1 else None)
     if set(roles) != {'en', 'vi'}:
+        # These two documented export schemas identify source/target roles;
+        # do not infer language from arbitrary prose or file selection order.
+        from .preprocess import recognizes_reading_pair
+        first,_=_read(selected[0]);second,_=_read(selected[1])
+        if recognizes_reading_pair(first,second):return selected[0],selected[1]
+        if recognizes_reading_pair(second,first):return selected[1],selected[0]
         raise AmbiguousJSONPairError(
             'Chưa xác định được ngôn ngữ từ tên file. Chọn rõ file tiếng Anh và file tiếng Việt; '
             'ví dụ đặt tên data_home_en.json và data_home_vi.json.')
@@ -55,6 +61,8 @@ def resolve_json_pair(paths) -> tuple[Path, Path]:
 def _is_single_language_document(document):
     if not isinstance(document, dict) or not document:
         return False
+    if (isinstance(document.get('dialogue'),list) and isinstance(document.get('drawn_cards'),list)) or (isinstance(document.get('interpretation'),dict) and isinstance(document.get('cards'),list)):
+        return True
     paired_fields = {'key', 'english', 'vietnamese', 'context', 'translations', 'en', 'vi'}
     if not (set(document) & paired_fields) and all(isinstance(value, str) for value in document.values()):
         return True
