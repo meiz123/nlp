@@ -137,10 +137,15 @@ class Window(QMainWindow):
         for title,fieldname in [('LOCAL','local_text'),('GEMINI','gemini_text')]:
             box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(title));field=QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(50);setattr(self,fieldname,field);box.addWidget(field,1);comparebox.addLayout(box)
         self.reviewtabs.addTab(comparison,'So sánh Local · Gemini')
+        revision=QWidget();revisionbox=QHBoxLayout(revision)
+        for label,name in [('TRƯỚC KHI SỬA','before_revision'),('SAU KHI SỬA','after_revision')]:
+            column=QVBoxLayout();column.addWidget(QLabel(label));field=QPlainTextEdit();field.setReadOnly(True);setattr(self,name,field);column.addWidget(field);revisionbox.addLayout(column)
+        self.reviewtabs.addTab(revision,'Trước và sau chỉnh sửa')
         editbar=QHBoxLayout();editbar.setSpacing(12);right.addLayout(editbar,3)
         finalbox=QVBoxLayout();finalbox.setSpacing(5);final_label=QLabel('BẢN SỬA CUỐI');final_label.setToolTip('Chỉ dùng để train sau khi bạn duyệt bản sửa.');finalbox.addWidget(final_label)
         self.translation=QPlainTextEdit();self.translation.setMinimumHeight(70);self.translation.textChanged.connect(self.translation_edited);self.translation.setPlaceholderText('Chỉnh bản dịch tại đây rồi duyệt');finalbox.addWidget(self.translation,1);editbar.addLayout(finalbox,3)
         notesbox=QVBoxLayout();notesbox.setSpacing(5);noteshead=QHBoxLayout();noteshead.addWidget(QLabel('GHI CHÚ'));noteshead.addStretch()
+        self.revisebutton=QPushButton('Sửa lại theo ghi chú');self.revisebutton.setObjectName('compact');self.revisebutton.setToolTip('Gửi câu Anh, bản dịch đang sửa và ghi chú đến Gemini để tạo bản sửa mới');self.revisebutton.clicked.connect(self.revise_source);noteshead.addWidget(self.revisebutton)
         self.savenotes=QPushButton('Lưu');self.savenotes.setToolTip('Lưu ghi chú, không duyệt bản dịch.');self.savenotes.setObjectName('compact');self.savenotes.clicked.connect(self.save_review_notes);noteshead.addWidget(self.savenotes);notesbox.addLayout(noteshead)
         self.notes=QPlainTextEdit();self.notes.setMinimumHeight(70);self.notes.setPlaceholderText('Gợi ý chưa tốt ở đâu?');self.notes.textChanged.connect(self.note_edited);notesbox.addWidget(self.notes,1);editbar.addLayout(notesbox,2)
         finalactions=QHBoxLayout();right.addLayout(finalactions)
@@ -166,6 +171,7 @@ class Window(QMainWindow):
         self.save_sentence.setVisible(manual);self.save_sentence.setEnabled(manual and not running and self._manual_result is not None)
         selected=not manual and 0<=self.table.currentRow()<len(self.data)
         self.approvebutton.setEnabled(selected and not running);self.translation.setReadOnly(running or not (selected or manual));self.nextbutton.setEnabled(selected and not running)
+        self.revisebutton.setEnabled(not running and (selected or manual))
         self.notes.setReadOnly(running or not (selected or manual));self.reviewcheck.setEnabled(selected and not running);self.savenotes.setEnabled((selected or manual) and not running)
         self.savenotes.setText('Lưu nháp' if manual else 'Lưu')
         self.savenotes.setToolTip('Ghi chú đi cùng câu nhập trực tiếp; lưu câu vào project để giữ feedback lâu dài.' if manual else 'Lưu ghi chú, không duyệt bản dịch.')
@@ -409,7 +415,7 @@ class Window(QMainWindow):
         if i<0 or i>=len(self.data):
             self.rowtitle.setText('');self.focuslabel.setText('CHỌN MỘT CÂU ĐỂ REVIEW')
             self._selected_key=None;self._loading_feedback=True
-            for field in [self.source,self.current,self.detail,self.translation,self.notes,self.local_text,self.gemini_text]:field.clear()
+            for field in [self.source,self.current,self.detail,self.translation,self.notes,self.local_text,self.gemini_text,self.before_revision,self.after_revision]:field.clear()
             self.reviewcheck.setChecked(False);self._loading_feedback=False
             self.refresh_controls();return
         r=self.data[i];result=json.loads(r['result']) if r['result'] else {}
@@ -422,6 +428,8 @@ class Window(QMainWindow):
         backend=self.project.backend_results(r['key']);comparison=backend.get('comparison',{})
         self.local_text.setPlainText(backend.get('local',{}).get('translation','Chưa có kết quả local.'))
         self.gemini_text.setPlainText(backend.get('gemini',{}).get('translation',result.get('suggestion') or 'Chưa có bản sửa Gemini riêng.'))
+        revision_history=backend.get('gemini',{}).get('revisions',result.get('revisions',[]))
+        self.show_revision(revision_history)
         message='\n'.join('• '+issue for issue in result.get('issues',[]))
         if comparison:
             message+='\nSo sánh: '+comparison.get('reason','')+'\nCần thêm ngữ cảnh: '+comparison.get('context_needed','')
@@ -440,7 +448,7 @@ class Window(QMainWindow):
         if checked:
             self._flush_note_drafts();self.source.setPlainText(self._manual_source)
             self.current.clear();self.translation.clear();self.notes.setPlainText(self._manual_notes);self.detail.setPlainText('Nhập tiếng Anh và bấm Dịch sang tiếng Việt. Bản dịch mới cần bạn duyệt.')
-            self.local_text.clear();self.gemini_text.clear();self._manual_result=None
+            self.local_text.clear();self.gemini_text.clear();self.show_revision([]);self._manual_result=None
             self.focuslabel.setText('DỊCH CÂU NHẬP TRỰC TIẾP');self.rowtitle.setText('Chưa lưu vào project');self.reviewcheck.setChecked(False)
         else:
             self._manual_source=self.source.toPlainText();self._manual_notes=self.notes.toPlainText();self._manual_result=None
@@ -459,9 +467,15 @@ class Window(QMainWindow):
     def source_edited(self):
         if self._loading_feedback or not self.manual_mode.isChecked():return
         self._manual_source=self.source.toPlainText();self._manual_result=None
-        self.current.clear();self.translation.clear();self.refresh_controls()
+        self.current.clear();self.translation.clear();self.show_revision([]);self.refresh_controls()
+
+    def revise_source(self):
+        self.start_translation('revise')
 
     def translate_source(self):
+        self.start_translation('translate')
+
+    def start_translation(self,task):
         if self.worker:return
         english=self.source.toPlainText()
         if not english.strip():return self.error('Nhập câu tiếng Anh trước khi dịch')
@@ -475,26 +489,40 @@ class Window(QMainWindow):
         if not manual:
             row=next((dict(r) for r in self.data if r['key']==self._selected_key),None)
             if row is None:return self.error('Chọn câu hoặc bật Nhập trực tiếp')
+        if task=='revise':
+            if not self.notes.toPlainText().strip():return self.error('Nhập ghi chú về điểm cần sửa trước')
+            if not self.translation.toPlainText().strip():return self.error('Cần có bản dịch hiện tại để sửa theo ghi chú')
+            row={**row,'vietnamese':self.translation.toPlainText(),'revision_notes':self.notes.toPlainText()}
+            previous=self._manual_result or {} if manual else self.project.backend_results(row['key']).get('gemini',{})
+            row['_revision_history']=previous.get('revisions',[])
         self._translation_request=(manual,row)
         self._translation_received=False
-        self.last_error='';self.worker=TranslationWorker(self.project.path if self.project else None,row,self.key.text().strip(),self.model.text().strip(),self.fallback_models.text(),self.context.toPlainText())
+        self.last_error='';self.worker=TranslationWorker(self.project.path if self.project else None,row,self.key.text().strip(),self.model.text().strip(),self.fallback_models.text(),self.context.toPlainText(),task=task)
         self.worker.progress.connect(self.status.setText);self.worker.failed.connect(self.run_error);self.worker.ready.connect(self.translation_ready);self.worker.finished.connect(self.translation_finished)
-        self.busy(True);self.status.setText('Đang dịch sang tiếng Việt…');self.worker.start()
+        self.busy(True);self.status.setText('Đang sửa theo ghi chú…' if task=='revise' else 'Đang dịch sang tiếng Việt…');self.worker.start()
 
     def translation_ready(self,result):
         self._translation_received=True
         manual,row=self._translation_request
+        if result.get('task')=='revise':
+            result={**result,'revisions':row.get('_revision_history',[])+[{'before':row['vietnamese'],'after':result['suggestion'],'notes':row['revision_notes'],'model_used':result['model_used'],'reason':result['reason']}]}
+            self.show_revision(result['revisions']);self.reviewtabs.setCurrentIndex(2)
         self._loading_feedback=True
         self.translation.setPlainText(result['suggestion']);self.gemini_text.setPlainText(result['suggestion'])
         self.detail.setPlainText('Model xử lý: '+result['model_used']+(' (dự phòng)' if result.get('used_fallback') else '')+'\n'+result['reason']+'\nBản dịch mới chưa được duyệt.')
         if manual:
-            self.current.setPlainText(result['suggestion']);self._manual_result=result
+            self.current.setPlainText(row['vietnamese'] if result.get('task')=='revise' else result['suggestion']);self._manual_result=result
         else:
             self.project.save_backend_result(row['key'],'gemini',{**result,'translation':result['suggestion']})
-            self._translation_drafts[row['key']]={name:row.get(name) or '' for name in ('english','vietnamese','context')}
+            original=next((item for item in self.data if item['key']==row['key']),row)
+            self._translation_drafts[row['key']]={name:original.get(name) or '' for name in ('english','vietnamese','context')}
             self._translation_drafts[row['key']]['text']=result['suggestion']
             self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
         self._loading_feedback=False
+
+    def show_revision(self,history):
+        last=history[-1] if history else {}
+        self.before_revision.setPlainText(last.get('before',''));self.after_revision.setPlainText(last.get('after',''))
 
     def translation_finished(self):
         stopped=bool(self.worker and self.worker.stop.is_set());received=getattr(self,'_translation_received',False)
@@ -592,7 +620,7 @@ class Window(QMainWindow):
         except Exception:self.error('Không xóa được key trong kho bảo mật')
     def busy(self,on):
         self.table.setEnabled(not on)
-        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.pastebutton,self.translatebutton,self.translatebelow,self.save_sentence]:w.setEnabled(not on)
+        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.pastebutton,self.translatebutton,self.translatebelow,self.save_sentence,self.revisebutton]:w.setEnabled(not on)
         self.source.setReadOnly(on or not self.manual_mode.isChecked());self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):

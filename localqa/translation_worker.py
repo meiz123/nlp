@@ -12,10 +12,10 @@ class TranslationWorker(QThread):
     failed = Signal(str)
     ready = Signal(dict)
 
-    def __init__(self, path, row, key, model, fallbacks, context):
+    def __init__(self, path, row, key, model, fallbacks, context, task="translate"):
         super().__init__()
         self.args = path, dict(row), key, model, fallbacks, context
-        self.stop = threading.Event()
+        self.stop = threading.Event();self.task=task
 
     def run(self):
         from .gemini import Gemini
@@ -26,7 +26,7 @@ class TranslationWorker(QThread):
                 p = Project(path or str(Path(temp) / 'translation.lqa'))
                 client = Gemini(key)
                 router = ReviewRouter(client, p, model_chain(model, fallbacks), context, self.stop, self.progress.emit)
-                result = router.review(row, task='translate')
+                result = router.review(row, task=self.task)
                 if not self.stop.is_set():self.ready.emit(result)
             except ReviewCancelled:
                 pass

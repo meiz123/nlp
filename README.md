@@ -120,3 +120,9 @@ Prompt mặc định dùng tiêu chí chung về đúng nghĩa, tiếng Việt t
 Ô Ghi chú nhập được ở cả Nhập trực tiếp và review từng câu. Ghi chú của câu nhập trực tiếp tách riêng với câu đang chọn trong danh sách; bấm Lưu để giữ nháp. Nếu chưa có project, ghi chú được giữ trong phiên app. Nếu đã có project, nháp nguồn và ghi chú lưu trong project, có thể khôi phục sau khi mở lại. Khi Lưu câu vào project, ghi chú gắn đúng câu mới; không tự duyệt hay đưa ghi chú thành bản dịch chuẩn.
 
 Chuyển chế độ, API lỗi hoặc dừng xử lý giữ ghi chú. Notes không tự gửi đến Gemini. Các câu lấy hoàn toàn từ cache không chờ 5 giây; các yêu cầu API mới vẫn được giữ khoảng nghỉ. Dừng dịch không còn thông báo nhầm đã có bản dịch mới.
+
+## Sửa lại theo ghi chú
+
+Sau khi có bản dịch, nhập feedback vào Ghi chú và bấm **Sửa lại theo ghi chú**. Chỉ thao tác này gửi câu Anh, bản dịch đang sửa, ghi chú và ngữ cảnh đến Gemini. Lưu ghi chú thông thường không gọi model. App yêu cầu có câu nguồn, bản dịch và ghi chú trước khi chạy; dùng cùng model dự phòng và kiểm tra placeholder.
+
+Tab **Trước và sau chỉnh sửa** đối chiếu bản cũ và bản mới. Các lượt sửa cùng ghi chú và model được lưu cùng kết quả khi có project hoặc khi lưu câu nhập trực tiếp vào project. Cache tác vụ sửa riêng biệt, phụ thuộc cả bản dịch hiện tại và ghi chú. Bản sửa là nháp, không tự thay bản đã duyệt hoặc trở thành nhãn train. Ghi chú không được model coi là chân lý: khi feedback mâu thuẫn với nguồn, model được yêu cầu giữ đúng nghĩa và nêu lý do.

@@ -31,6 +31,9 @@ def model_chain(primary, fallbacks):
 def task_cache_key(row, model, context, task):
     if task == 'review':
         return fingerprint(row, model, context)
+    if task == 'revise':
+        source={**row,'context':json.dumps([row.get('context',''),row.get('revision_notes','')],ensure_ascii=False)}
+        return fingerprint(source,'revise-v1:'+model,context)
     if task != 'translate':
         raise ValueError('Tác vụ không hợp lệ')
     # The translation request never sends the existing Vietnamese text. A target
@@ -42,7 +45,7 @@ def task_cache_key(row, model, context, task):
 def validate_result(result, row, task):
     from .gemini import ReviewValidationError, parse_review
     result = parse_review(json.dumps(result, ensure_ascii=False))
-    if task == 'translate' and (result['status'] != 'REVIEW' or not result['suggestion'].strip()):
+    if task in ('translate','revise') and (result['status'] != 'REVIEW' or not result['suggestion'].strip()):
         raise ReviewValidationError('Chưa có bản dịch hợp lệ')
     if result['suggestion'] and 'Placeholder không khớp' in technical(row['english'], result['suggestion']):
         raise ReviewValidationError('Đề xuất làm thay đổi placeholder')
@@ -64,7 +67,7 @@ class ReviewRouter:
                 'task': task, 'cache_hit': cached}
 
     def review(self, row, task='review'):
-        if task not in ('review', 'translate'):
+        if task not in ('review', 'translate', 'revise'):
             raise ValueError('Tác vụ không hợp lệ')
         from .gemini import ReviewValidationError
         order = [self.active] + [m for m in self.models if m != self.active]
