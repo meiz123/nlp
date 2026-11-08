@@ -227,6 +227,11 @@ def load_json_pair(english_path: str | Path, vietnamese_path: str | Path
         raise ValueError('Cần chọn hai file riêng, không chọn cùng một file cho hai ngôn ngữ')
     english, en_hash = _read(source)
     vietnamese, vi_hash = _read(target)
+    from .preprocess import recognizes_reading_pair,prepare_reading_pair
+    if recognizes_reading_pair(english,vietnamese):
+        rows,report=prepare_reading_pair(english,vietnamese)
+        report['source_sha256']={'en':en_hash,'vi':vi_hash}
+        return rows,report
     flat = (isinstance(english, dict) and isinstance(vietnamese, dict)
             and all(isinstance(v, str) for v in english.values())
             and all(isinstance(v, str) for v in vietnamese.values()))

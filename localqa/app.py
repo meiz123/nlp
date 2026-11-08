@@ -330,6 +330,10 @@ class Window(QMainWindow):
                 from .input_word import load_word
                 rows=load_word(str(path))
             else:raise ValueError('Chọn CSV, Excel XLSX, JSON, DOCX hoặc DOC. Có thể chọn cùng lúc hai JSON Anh–Việt.')
+        from .preprocess import preprocess_rows
+        rows,preprocessing=preprocess_rows(rows)
+        report={**report,'preprocessing':report.get('preprocessing',preprocessing)}
+        report['diagnostics']=report.get('diagnostics',[])+preprocessing['diagnostics']
         if not rows:raise ValueError('File chưa có cặp câu nào để nhập')
         if create_project:
             if not self.confirm_input_report(rows,report):return False

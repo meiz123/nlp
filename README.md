@@ -126,3 +126,9 @@ Chuyển chế độ, API lỗi hoặc dừng xử lý giữ ghi chú. Notes kh�
 Sau khi có bản dịch, nhập feedback vào Ghi chú và bấm **Sửa lại theo ghi chú**. Chỉ thao tác này gửi câu Anh, bản dịch đang sửa, ghi chú và ngữ cảnh đến Gemini. Lưu ghi chú thông thường không gọi model. App yêu cầu có câu nguồn, bản dịch và ghi chú trước khi chạy; dùng cùng model dự phòng và kiểm tra placeholder.
 
 Tab **Trước và sau chỉnh sửa** đối chiếu bản cũ và bản mới. Các lượt sửa cùng ghi chú và model được lưu cùng kết quả khi có project hoặc khi lưu câu nhập trực tiếp vào project. Cache tác vụ sửa riêng biệt, phụ thuộc cả bản dịch hiện tại và ghi chú. Bản sửa là nháp, không tự thay bản đã duyệt hoặc trở thành nhãn train. Ghi chú không được model coi là chân lý: khi feedback mâu thuẫn với nguồn, model được yêu cầu giữ đúng nghĩa và nêu lý do.
+
+## Tiền xử lý trước khi nhập
+
+Mọi đầu vào qua bước chuẩn hóa cấu trúc local, kiểm tra key/kiểu dữ liệu, chỉ giữ key, english, vietnamese, context và bỏ dòng cả hai ngôn ngữ trống. Không cắt khoảng trắng hoặc sửa nội dung gốc. Chưa gọi model.
+
+Hỗ trợ cặp JSON reading có `drawn_cards` + `dialogue` phía Anh và `cards` + `interpretation` phía Việt. Chọn cùng lúc cả hai file, xác định file Anh nếu tên chưa rõ. Ghép lá bài bằng tên Anh, bỏ metadata kỹ thuật và câu hỏi lặp. Sáu đoạn giải nghĩa chưa có ID chung nên mapping theo section/thứ tự được báo rõ để người dùng xác nhận; cấu trúc lạ, nguồn khác hoặc lá bài khác bị từ chối thay vì tự đoán. Cảnh báo bản dịch kết thúc bằng dấu ba chấm và thiếu bản Việt được giữ lại cho review. Đây là tiền xử lý cấu trúc, không chứng minh bản dịch đúng nghĩa và không bảo đảm giảm tổng token của nhiều lần gọi model.
