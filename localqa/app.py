@@ -7,6 +7,7 @@ from .core import Project,load_csv,technical,fingerprint,export_rows,export_trai
 from .routing import ReviewRouter, ReviewCancelled, ModelsUnavailable, model_chain, DEFAULT_FALLBACKS
 
 from .translation_worker import TranslationWorker
+from .text_input import SourceTextEdit
 
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 
@@ -116,12 +117,13 @@ class Window(QMainWindow):
         self.focuslabel=QLabel('CHỌN MỘT CÂU ĐỂ REVIEW');self.focuslabel.setObjectName('focusTitle');right.addWidget(self.focuslabel)
         self.rowtitle=QLabel('');self.rowtitle.setObjectName('activeKey');self.rowtitle.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);right.addWidget(self.rowtitle)
         entrybar=QHBoxLayout();self.manual_mode=QCheckBox('Nhập trực tiếp');self.manual_mode.toggled.connect(self.toggle_manual);entrybar.addWidget(self.manual_mode)
+        self.pastebutton=QPushButton('Dán');self.pastebutton.setToolTip('Dán văn bản từ clipboard • Cmd+V hoặc Ctrl+V');self.pastebutton.clicked.connect(self.paste_source);entrybar.addWidget(self.pastebutton)
         self.translatebutton=QPushButton('Dịch sang tiếng Việt');self.translatebutton.clicked.connect(self.translate_source);entrybar.addWidget(self.translatebutton)
         self.save_sentence=QPushButton('Lưu câu vào project');self.save_sentence.clicked.connect(self.save_manual_sentence);entrybar.addWidget(self.save_sentence);entrybar.addStretch();right.addLayout(entrybar)
         sourcebar=QHBoxLayout();sourcebar.setSpacing(12);right.addLayout(sourcebar,2)
         for label,fieldname in [('TIẾNG ANH','source'),('BẢN DỊCH HIỆN TẠI','current')]:
             box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(label))
-            field=QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1);sourcebar.addLayout(box)
+            field=SourceTextEdit() if fieldname=='source' else QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1);sourcebar.addLayout(box)
         self.source.setPlaceholderText('Nhập hoặc dán câu tiếng Anh tại đây, rồi bấm Dịch sang tiếng Việt');self.source.textChanged.connect(self.source_edited)
         self.reviewtabs=QTabWidget();self.reviewtabs.setObjectName('reviewTabs');self.reviewtabs.setMinimumHeight(100);right.addWidget(self.reviewtabs,3)
         self.detail=QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMinimumHeight(50);self.reviewtabs.addTab(self.detail,'Nhận xét & ngữ cảnh')
@@ -149,6 +151,7 @@ class Window(QMainWindow):
         has=bool(self.project);running=bool(self.worker)
         for w in self.actions[2:]+[self.runbutton]:w.setEnabled(has and not running)
         manual=self.manual_mode.isChecked()
+        self.pastebutton.setEnabled(manual and not running)
         self.source.setReadOnly(running or not manual);self.manual_mode.setEnabled(not running)
         self.translatebutton.setEnabled(not running and (manual or bool(self._selected_key)))
         self.save_sentence.setVisible(manual);self.save_sentence.setEnabled(manual and not running and self._manual_result is not None)
@@ -427,6 +430,10 @@ class Window(QMainWindow):
         self.refresh_controls()
         if checked:self.source.setFocus()
 
+    def paste_source(self):
+        if self.worker or not self.manual_mode.isChecked():return
+        self.source.setFocus();self.source.paste()
+
     def source_edited(self):
         if self._loading_feedback or not self.manual_mode.isChecked():return
         self._manual_source=self.source.toPlainText();self._manual_result=None
@@ -539,7 +546,7 @@ class Window(QMainWindow):
         except Exception:self.error('Không xóa được key trong kho bảo mật')
     def busy(self,on):
         self.table.setEnabled(not on)
-        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.translatebutton,self.save_sentence]:w.setEnabled(not on)
+        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.pastebutton,self.translatebutton,self.save_sentence]:w.setEnabled(not on)
         self.source.setReadOnly(on or not self.manual_mode.isChecked());self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):
