@@ -30,17 +30,20 @@ class Worker(QThread):
             for index,row in enumerate(pending):
                 if self.stop.is_set():break
                 if row['reviewed']:continue
+                made_request=False
                 issues=technical(row['english'],row['vietnamese'])
                 if offline:
                     result={'status':'REVIEW','issues':issues,'reason':'Chỉ kiểm tra kỹ thuật; chưa đánh giá ngôn ngữ.','suggestion':''}
                 else:
                     task='translate' if not row['vietnamese'].strip() else 'review'
+                    requests_before=router.request_count
                     result=router.review(row,task=task)
+                    made_request=router.request_count>requests_before
                     if task=='translate':issues=[]
                     if issues:result={**result,'status':'FAIL' if result['status']=='FAIL' or 'Placeholder không khớp' in issues or 'Thiếu bản dịch tiếng Việt' in issues else 'REVIEW','issues':issues+result['issues']}
                     if self.stop.is_set():break
                 p.save_result(row['key'],result);self.progress.emit('Đã lưu: '+row['key']);self.updated.emit(index+1,len(pending))
-                if not offline and index+1<len(pending) and self.stop.wait(5):break
+                if made_request and index+1<len(pending) and self.stop.wait(5):break
         except ReviewCancelled:
             pass
         except ModelsUnavailable as exc:
@@ -57,7 +60,7 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Localization QA • Anh–Việt');self.resize(1380,900);self.setMinimumSize(1020,720)
-        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._translation_drafts={};self._draft_project=None;self._loading_feedback=False;self._manual_source='';self._manual_result=None;self._translation_request=None
+        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._translation_drafts={};self._draft_project=None;self._loading_feedback=False;self._manual_source='';self._manual_notes='';self._manual_result=None;self._translation_request=None
         root=QWidget();root.setObjectName('root');self.setCentralWidget(root)
         layout=QVBoxLayout(root);layout.setContentsMargins(18,14,18,12);layout.setSpacing(10)
         header=QHBoxLayout();layout.addLayout(header)
@@ -163,7 +166,9 @@ class Window(QMainWindow):
         self.save_sentence.setVisible(manual);self.save_sentence.setEnabled(manual and not running and self._manual_result is not None)
         selected=not manual and 0<=self.table.currentRow()<len(self.data)
         self.approvebutton.setEnabled(selected and not running);self.translation.setReadOnly(running or not (selected or manual));self.nextbutton.setEnabled(selected and not running)
-        self.notes.setReadOnly(running or not selected);self.reviewcheck.setEnabled(selected and not running);self.savenotes.setEnabled(selected and not running)
+        self.notes.setReadOnly(running or not (selected or manual));self.reviewcheck.setEnabled(selected and not running);self.savenotes.setEnabled((selected or manual) and not running)
+        self.savenotes.setText('Lưu nháp' if manual else 'Lưu')
+        self.savenotes.setToolTip('Ghi chú đi cùng câu nhập trực tiếp; lưu câu vào project để giữ feedback lâu dài.' if manual else 'Lưu ghi chú, không duyệt bản dịch.')
     def filter_rows(self):
         query=self.search.text().casefold();mode=self.filter.currentIndex()
         for i,r in enumerate(self.data):
@@ -196,7 +201,13 @@ class Window(QMainWindow):
                 self._flush_note_drafts()
                 self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.set_setting('fallback_models',self.fallback_models.text());self.project.close()
             self._selected_key=None;self._note_drafts.clear()
-            self.project=p;self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.fallback_models.setText(p.setting('fallback_models',DEFAULT_FALLBACKS));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path);return True
+            self.project=p
+            try:manual_draft=json.loads(p.setting('manual_entry_draft','{}'))
+            except (ValueError,TypeError):manual_draft={}
+            if not isinstance(manual_draft,dict):manual_draft={}
+            self._manual_source=manual_draft.get('english','') if isinstance(manual_draft.get('english',''),str) else ''
+            self._manual_notes=manual_draft.get('notes','') if isinstance(manual_draft.get('notes',''),str) else ''
+            self.context.setPlainText(p.setting('context'));self.model.setText(p.setting('model',DEFAULT_MODEL));self.fallback_models.setText(p.setting('fallback_models',DEFAULT_FALLBACKS));self.project_label.setText(__import__('pathlib').Path(path).name);self.project_label.setToolTip(path);self.refresh();self.status.setText('Project đã mở • '+path);return True
         except Exception as e:self.error(e);return False
     def choose_file(self,title,filters,save=False):
         dialog=QFileDialog(self,title);dialog.setNameFilters(filters.split(';;'))
@@ -428,13 +439,16 @@ class Window(QMainWindow):
         self._loading_feedback=True
         if checked:
             self._flush_note_drafts();self.source.setPlainText(self._manual_source)
-            self.current.clear();self.translation.clear();self.notes.clear();self.detail.setPlainText('Nhập tiếng Anh và bấm Dịch sang tiếng Việt. Bản dịch mới cần bạn duyệt.')
+            self.current.clear();self.translation.clear();self.notes.setPlainText(self._manual_notes);self.detail.setPlainText('Nhập tiếng Anh và bấm Dịch sang tiếng Việt. Bản dịch mới cần bạn duyệt.')
             self.local_text.clear();self.gemini_text.clear();self._manual_result=None
             self.focuslabel.setText('DỊCH CÂU NHẬP TRỰC TIẾP');self.rowtitle.setText('Chưa lưu vào project');self.reviewcheck.setChecked(False)
         else:
-            self._manual_source=self.source.toPlainText();self._manual_result=None
+            self._manual_source=self.source.toPlainText();self._manual_notes=self.notes.toPlainText();self._manual_result=None
+            self._save_manual_note_draft()
         self._loading_feedback=False
-        if not checked:self.select()
+        if not checked:
+            if self.project:self.refresh()
+            else:self.select()
         self.refresh_controls()
         if checked:self.source.setFocus()
 
@@ -462,11 +476,13 @@ class Window(QMainWindow):
             row=next((dict(r) for r in self.data if r['key']==self._selected_key),None)
             if row is None:return self.error('Chọn câu hoặc bật Nhập trực tiếp')
         self._translation_request=(manual,row)
+        self._translation_received=False
         self.last_error='';self.worker=TranslationWorker(self.project.path if self.project else None,row,self.key.text().strip(),self.model.text().strip(),self.fallback_models.text(),self.context.toPlainText())
         self.worker.progress.connect(self.status.setText);self.worker.failed.connect(self.run_error);self.worker.ready.connect(self.translation_ready);self.worker.finished.connect(self.translation_finished)
         self.busy(True);self.status.setText('Đang dịch sang tiếng Việt…');self.worker.start()
 
     def translation_ready(self,result):
+        self._translation_received=True
         manual,row=self._translation_request
         self._loading_feedback=True
         self.translation.setPlainText(result['suggestion']);self.gemini_text.setPlainText(result['suggestion'])
@@ -481,22 +497,29 @@ class Window(QMainWindow):
         self._loading_feedback=False
 
     def translation_finished(self):
+        stopped=bool(self.worker and self.worker.stop.is_set());received=getattr(self,'_translation_received',False)
         self.worker=None;self.busy(False);self.refresh_controls()
-        self.status.setText(self.last_error or ('Đã có bản dịch. Chỉnh và lưu câu vào project để review.' if self.manual_mode.isChecked() else 'Đã có bản dịch nháp. Kiểm tra trước khi duyệt.'))
+        if self.last_error:self.status.setText(self.last_error);return
+        if stopped or not received:
+            self.status.setText('Đã dừng dịch. Nội dung và ghi chú được giữ nguyên; bấm Dịch bằng model để thử lại.' if stopped else 'Chưa có bản dịch mới. Nội dung và ghi chú được giữ nguyên.');return
+        self.status.setText(('Đã có bản dịch. Chỉnh và lưu câu vào project để review.' if self.manual_mode.isChecked() else 'Đã có bản dịch nháp. Kiểm tra trước khi duyệt.'))
 
     def save_manual_sentence(self):
         if self.worker or not self.manual_mode.isChecked() or not self._manual_result:return
         text=self.translation.toPlainText();english=self.source.toPlainText()
         if not text.strip() or 'Placeholder không khớp' in technical(english,text):return self.error('Bản dịch cần có nội dung và giữ đúng placeholder')
         result=dict(self._manual_result);result['suggestion']=text
+        manual_notes=self.notes.toPlainText();manual_context=self.context.toPlainText()
         # Ask for a project destination only when the user explicitly saves.
         if not self.project:
             if not self.create_input_project():return
         import uuid
         key='manual/'+uuid.uuid4().hex
-        self.project.import_rows([{'key':key,'english':english,'vietnamese':'','context':self.context.toPlainText()}])
-        self.project.save_result(key,result)
-        self.manual_mode.setChecked(False);self.refresh();self.search.clear();self.filter.setCurrentIndex(0)
+        self.project.import_rows([{'key':key,'english':english,'vietnamese':'','context':manual_context}])
+        self.project.save_result(key,result);self.project.save_notes(key,manual_notes)
+        self.manual_mode.setChecked(False)
+        self._manual_notes='';self.project.set_setting('manual_entry_draft','{}')
+        self.refresh();self.search.clear();self.filter.setCurrentIndex(0)
         for i,r in enumerate(self.data):
             if r['key']==key:self.table.selectRow(i);break
         self.status.setText('Đã lưu câu và bản dịch đề xuất. Chưa duyệt bản sửa.')
@@ -510,14 +533,27 @@ class Window(QMainWindow):
             self._translation_drafts[self._selected_key]['text']=self.translation.toPlainText()
             self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
     def note_edited(self):
-        if not self._loading_feedback and self._selected_key and not self.worker:
+        if self._loading_feedback or self.worker:return
+        if self.manual_mode.isChecked():
+            self._manual_notes=self.notes.toPlainText()
+        elif self._selected_key:
             self._note_drafts[self._selected_key]=self.notes.toPlainText()
+    def _save_manual_note_draft(self):
+        if self.project:
+            self.project.set_setting('manual_entry_draft',json.dumps(
+                {'english':self._manual_source,'notes':self._manual_notes},ensure_ascii=False))
     def _flush_note_drafts(self):
         if self.project:
             for key,note in self._note_drafts.items():self.project.save_notes(key,note)
         self._note_drafts.clear()
     def save_review_notes(self):
-        if not self.project or not self._selected_key or self.worker:return
+        if self.worker:return
+        if self.manual_mode.isChecked():
+            self._manual_source=self.source.toPlainText();self._manual_notes=self.notes.toPlainText()
+            self._save_manual_note_draft()
+            self.status.setText('Đã lưu nháp ghi chú trong project. Chưa duyệt bản dịch.' if self.project else 'Đã giữ nháp ghi chú trong phiên này. Lưu câu vào project để giữ lâu dài.')
+            return
+        if not self.project or not self._selected_key:return
         self.project.save_notes(self._selected_key,self.notes.toPlainText())
         self._note_drafts.pop(self._selected_key,None);self.refresh();self.status.setText('Đã lưu ghi chú. Bản dịch chưa tự được duyệt để train.')
     def review_toggled(self,checked):
@@ -584,7 +620,8 @@ class Window(QMainWindow):
     def run_error(self,message):
         self.last_error=message;self.error(message)
     def finished(self):
-        self.worker=None;self.busy(False);self.refresh();self.status.setText(self.last_error or 'Đã lưu tiến độ. Chọn một câu để duyệt kết quả.')
+        stopped=bool(self.worker and self.worker.stop.is_set())
+        self.worker=None;self.busy(False);self.refresh();self.status.setText(self.last_error or ('Đã dừng kiểm tra và lưu tiến độ. Có thể tiếp tục sau.' if stopped else 'Đã lưu tiến độ. Chọn một câu để duyệt kết quả.'))
     def export(self):
         if self.worker:return
         if self.manual_mode.isChecked() and self._manual_result:
@@ -609,6 +646,8 @@ class Window(QMainWindow):
     def closeEvent(self,event):
         if self.worker and self.worker.isRunning():self.stop();self.error('Đang dừng kiểm tra. Hãy đóng lại khi đã lưu tiến độ.');event.ignore();return
         if self.project:
+            if self.manual_mode.isChecked():
+                self._manual_source=self.source.toPlainText();self._manual_notes=self.notes.toPlainText();self._save_manual_note_draft()
             self._flush_note_drafts()
             self.project.set_setting('context',self.context.toPlainText());self.project.set_setting('model',self.model.text());self.project.set_setting('fallback_models',self.fallback_models.text());self.project.close()
         event.accept()

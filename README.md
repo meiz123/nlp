@@ -104,3 +104,19 @@ Các model dùng cùng prompt, ngữ cảnh và schema; đề xuất làm mất/
 - Bật **Nhập trực tiếp**, gõ/dán tiếng Anh vào ô nguồn, rồi bấm **Dịch sang tiếng Việt**. Chưa cần project. Kết quả hiện cạnh câu Anh và trong ô bản sửa. **Lưu câu vào project** giữ bản dịch đề xuất để review; thao tác này chưa phê duyệt bản dịch.
 - Khi đang chọn câu từ file, **Dịch sang tiếng Việt** tạo một bản nháp mới từ tiếng Anh mà không thay đổi nguồn hoặc bản dịch đã duyệt. Có thể duyệt bản nháp sau khi kiểm tra.
 - Dịch cần Internet và API key; dùng cùng danh sách model dự phòng. Cache dịch tách khỏi cache QA, giữ placeholder và không tự ghi nhãn huấn luyện. Dừng hoặc lỗi dịch vụ giữ nội dung nhập. Nội dung nhập trực tiếp chưa lưu vào project chỉ tồn tại trong phiên app.
+
+## Tối ưu xử lý và dùng lại kết quả
+
+App tìm kết quả cache hợp lệ của toàn bộ model đã cấu hình trước khi gọi API. Cache luôn được kiểm tra lại cấu trúc, loại tác vụ và placeholder; bản cache hỏng được bỏ qua thay vì hiển thị hoặc làm mất tiến độ. Kết quả từ model dự phòng có thể được dùng lại ngay mà không cần gọi model chính trước.
+
+Cache kiểm tra QA phụ thuộc câu Anh, bản Việt, ngữ cảnh, model và phiên bản prompt. Cache dịch mới chỉ phụ thuộc câu Anh, ngữ cảnh, model và phiên bản prompt dịch vì bản Việt hiện tại không được gửi trong yêu cầu dịch mới. Chỉnh bản Việt không làm tốn thêm lượt dịch lại cùng một nguồn. Hai loại cache tách biệt; thay ngữ cảnh hoặc prompt sẽ không dùng lại kết quả cũ.
+
+Lỗi câu trả lời như sai cấu trúc hoặc mất placeholder chỉ loại model đó cho câu đang xử lý; không coi model là hỏng cho mọi câu tiếp theo. Lỗi khả dụng như model không tồn tại, hết hạn mức hoặc dịch vụ lỗi vẫn được ghi nhận theo phiên chạy để tránh gọi lặp vô ích. Mọi lần gọi và thử lại đều có giới hạn; lỗi key/quyền truy cập không được xử lý bằng cách đổi model.
+
+Prompt mặc định dùng tiêu chí chung về đúng nghĩa, tiếng Việt tự nhiên, bảo toàn placeholder và không tự thêm ý. App không mặc định nội dung thuộc origami, Tarot hay một ngành cụ thể. Đặt lĩnh vực, đối tượng đọc, phong cách và thuật ngữ trong ngữ cảnh project khi cần. Đổi prompt không tự sửa bản dịch đã được con người duyệt; kết quả AI vẫn cần người dùng kiểm tra.
+
+## Ghi chú và tiếp tục công việc
+
+Ô Ghi chú nhập được ở cả Nhập trực tiếp và review từng câu. Ghi chú của câu nhập trực tiếp tách riêng với câu đang chọn trong danh sách; bấm Lưu để giữ nháp. Nếu chưa có project, ghi chú được giữ trong phiên app. Nếu đã có project, nháp nguồn và ghi chú lưu trong project, có thể khôi phục sau khi mở lại. Khi Lưu câu vào project, ghi chú gắn đúng câu mới; không tự duyệt hay đưa ghi chú thành bản dịch chuẩn.
+
+Chuyển chế độ, API lỗi hoặc dừng xử lý giữ ghi chú. Notes không tự gửi đến Gemini. Các câu lấy hoàn toàn từ cache không chờ 5 giây; các yêu cầu API mới vẫn được giữ khoảng nghỉ. Dừng dịch không còn thông báo nhầm đã có bản dịch mới.

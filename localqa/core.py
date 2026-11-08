@@ -2,7 +2,7 @@ import csv, hashlib, json, re, sqlite3
 from collections import Counter
 from pathlib import Path
 
-PROMPT_VERSION = '2'
+PROMPT_VERSION = '3'
 TOKEN = re.compile(r'%(?:\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?[a-zA-Z]|\{[a-zA-Z_][\w.]*\}|\{\d+\}')
 
 def technical(en, vi):

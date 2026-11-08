@@ -54,7 +54,7 @@ class FallbackTests(unittest.TestCase):
         self.p.cache(fingerprint(self.row,'backup','context'),dict(PASS))
         self.client.review.side_effect=ServiceError(404)
         self.assertEqual(self.router.review(self.row)['model_used'],'backup')
-        self.assertEqual(self.client.review.call_count,1)
+        self.assertEqual(self.client.review.call_count,0)
         other=ReviewRouter(self.client,self.p,['backup'],'different',self.stop,self.messages.append)
         with self.assertRaises(ModelsUnavailable):other.review(self.row)
     def test_chain_deduplicates_and_limits(self):

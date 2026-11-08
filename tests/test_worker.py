@@ -32,7 +32,7 @@ class ReviewWorkflowTests(unittest.TestCase):
         from localqa.core import fingerprint
         with tempfile.TemporaryDirectory() as d:
             path=str(Path(d)/'test.lqa');p=Project(path);p.import_rows([{'key':'a','english':'Hi %s','vietnamese':'Chào'}]);row=p.rows()[0]
-            p.cache(fingerprint(row,'model',''),{'status':'PASS','issues':[],'reason':'','suggestion':''});p.close()
+            p.cache(fingerprint(row,'model',''),{'status':'PASS','issues':[],'reason':'Đúng nghĩa.','suggestion':''});p.close()
             with patch('localqa.gemini.Gemini') as mock:
                 worker=Worker(path,'test','model','',False);worker.run();mock.return_value.review.assert_not_called()
             p=Project(path);import json
