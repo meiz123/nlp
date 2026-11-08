@@ -34,7 +34,8 @@ class ReviewRouter:
         self.unavailable = set()
         self.active = models[0]
 
-    def review(self, row):
+    def review(self, row, task="review"):
+        if task not in ("review", "translate"):raise ValueError("Tác vụ không hợp lệ")
         from .gemini import ReviewValidationError, parse_review
         order = [self.active] + [m for m in self.models if m != self.active]
         candidates = [m for m in order if m not in self.unavailable]
@@ -42,14 +43,16 @@ class ReviewRouter:
         for index, model in enumerate(candidates):
             if self.stop.is_set():
                 raise ReviewCancelled()
-            cache_key = fingerprint(row, model, self.context)
+            cache_key = fingerprint(row, model if task == "review" else "translate-v1:" + model, self.context)
             result = self.project.cached(cache_key)
             if result is None:
                 for attempt in range(3):
                     try:
-                        result = self.client.review(row, model, self.context)
+                        result = getattr(self.client, task)(row, model, self.context)
                         # Apply the same contract even when adapters are replaced.
                         result = parse_review(json.dumps(result, ensure_ascii=False))
+                        if task == 'translate' and (result['status'] != 'REVIEW' or not result['suggestion'].strip()):
+                            raise ReviewValidationError('Chưa có bản dịch hợp lệ')
                         if result['suggestion'] and 'Placeholder không khớp' in technical(row['english'], result['suggestion']):
                             raise ReviewValidationError('Đề xuất làm thay đổi placeholder')
                         if self.stop.is_set():
@@ -77,5 +80,5 @@ class ReviewRouter:
             if result is not None:
                 self.active = model
                 return {**result, 'model_used': model, 'primary_model': self.models[0],
-                        'used_fallback': model != self.models[0], 'prompt_version': PROMPT_VERSION}
+                        'used_fallback': model != self.models[0], 'prompt_version': PROMPT_VERSION, 'task': task}
         raise ModelsUnavailable(self.models, last_code)

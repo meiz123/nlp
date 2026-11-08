@@ -96,3 +96,11 @@ Trong Cấu hình Gemini, ô Model dự phòng nhận tối đa ba tên model, c
 Khi gặp 429, 404, lỗi dịch vụ 500/502/503/504, lỗi kết nối hoặc kết quả không hợp lệ, app chuyển sang model dự phòng tiếp theo. Model lỗi được bỏ qua trong lần chạy hiện tại. Khi hết lựa chọn, lỗi tạm thời được thử lại tối đa ba lần tổng cộng trên model cuối trước khi dừng và giữ tiến độ. Lỗi key/quyền/yêu cầu 400/401/403 dừng ngay. Bấm Kiểm tra / Tiếp tục bắt đầu lần chạy mới và có thể thử lại model chính.
 
 Các model dùng cùng prompt, ngữ cảnh và schema; đề xuất làm mất/thay đổi placeholder bị từ chối. Cache tách theo model và ngữ cảnh. Tab nhận xét và báo cáo ghi `model_used`, `used_fallback`; kết quả dự phòng không tự được duyệt hoặc đưa vào train. Cơ chế này bảo vệ cấu trúc và tiến độ, không bảo đảm các model có chất lượng ngôn ngữ tương đương; cần review và đánh giá bằng dữ liệu chuẩn.
+
+## Dịch từ file hoặc nhập trực tiếp
+
+- Nút **Mở project / dữ liệu** và **Nhập dữ liệu** nhận thêm Excel `.xlsx`. File `.xls` cũ cần Save As `.xlsx`. Mỗi sheet có hàng tiêu đề; bắt buộc `english` (hoặc `tiếng Anh`), tùy chọn `key`, `vietnamese`, `context`. Thiếu cột key sẽ tạo key theo sheet và số dòng. Không đánh giá công thức Excel; các ô nội dung phải là văn bản. JSON và Word tiếp tục dùng cấu trúc song ngữ hiện có, để `vietnamese` rỗng nếu cần tạo bản dịch mới.
+- **Bắt đầu kiểm tra** dịch mới các dòng có bản Việt trống và kiểm tra QA các dòng đã có bản Việt. Kết quả dịch mới luôn cần người dùng duyệt. Chế độ chỉ kiểm tra kỹ thuật không dịch.
+- Bật **Nhập trực tiếp**, gõ/dán tiếng Anh vào ô nguồn, rồi bấm **Dịch sang tiếng Việt**. Chưa cần project. Kết quả hiện cạnh câu Anh và trong ô bản sửa. **Lưu câu vào project** giữ bản dịch đề xuất để review; thao tác này chưa phê duyệt bản dịch.
+- Khi đang chọn câu từ file, **Dịch sang tiếng Việt** tạo một bản nháp mới từ tiếng Anh mà không thay đổi nguồn hoặc bản dịch đã duyệt. Có thể duyệt bản nháp sau khi kiểm tra.
+- Dịch cần Internet và API key; dùng cùng danh sách model dự phòng. Cache dịch tách khỏi cache QA, giữ placeholder và không tự ghi nhãn huấn luyện. Dừng hoặc lỗi dịch vụ giữ nội dung nhập. Nội dung nhập trực tiếp chưa lưu vào project chỉ tồn tại trong phiên app.

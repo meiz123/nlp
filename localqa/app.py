@@ -6,6 +6,8 @@ from .core import Project,load_csv,technical,fingerprint,export_rows,export_trai
 
 from .routing import ReviewRouter, ReviewCancelled, ModelsUnavailable, model_chain, DEFAULT_FALLBACKS
 
+from .translation_worker import TranslationWorker
+
 DEFAULT_MODEL = 'gemini-3.5-flash-lite'
 
 class Worker(QThread):
@@ -31,7 +33,9 @@ class Worker(QThread):
                 if offline:
                     result={'status':'REVIEW','issues':issues,'reason':'Chỉ kiểm tra kỹ thuật; chưa đánh giá ngôn ngữ.','suggestion':''}
                 else:
-                    result=router.review(row)
+                    task='translate' if not row['vietnamese'].strip() else 'review'
+                    result=router.review(row,task=task)
+                    if task=='translate':issues=[]
                     if issues:result={**result,'status':'FAIL' if result['status']=='FAIL' or 'Placeholder không khớp' in issues or 'Thiếu bản dịch tiếng Việt' in issues else 'REVIEW','issues':issues+result['issues']}
                     if self.stop.is_set():break
                 p.save_result(row['key'],result);self.progress.emit('Đã lưu: '+row['key']);self.updated.emit(index+1,len(pending))
@@ -52,7 +56,7 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Localization QA • Anh–Việt');self.resize(1380,900);self.setMinimumSize(1020,720)
-        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._translation_drafts={};self._draft_project=None;self._loading_feedback=False
+        self.project=None;self.worker=None;self.data=[];self.last_error='';self.file_dialogs=[];self._selected_key=None;self._note_drafts={};self._translation_drafts={};self._draft_project=None;self._loading_feedback=False;self._manual_source='';self._manual_result=None;self._translation_request=None
         root=QWidget();root.setObjectName('root');self.setCentralWidget(root)
         layout=QVBoxLayout(root);layout.setContentsMargins(18,14,18,12);layout.setSpacing(10)
         header=QHBoxLayout();layout.addLayout(header)
@@ -111,10 +115,14 @@ class Window(QMainWindow):
         right=QVBoxLayout(self.review_panel);right.setContentsMargins(16,12,16,12);right.setSpacing(8)
         self.focuslabel=QLabel('CHỌN MỘT CÂU ĐỂ REVIEW');self.focuslabel.setObjectName('focusTitle');right.addWidget(self.focuslabel)
         self.rowtitle=QLabel('');self.rowtitle.setObjectName('activeKey');self.rowtitle.setSizePolicy(QSizePolicy.Policy.Ignored,QSizePolicy.Policy.Preferred);right.addWidget(self.rowtitle)
+        entrybar=QHBoxLayout();self.manual_mode=QCheckBox('Nhập trực tiếp');self.manual_mode.toggled.connect(self.toggle_manual);entrybar.addWidget(self.manual_mode)
+        self.translatebutton=QPushButton('Dịch sang tiếng Việt');self.translatebutton.clicked.connect(self.translate_source);entrybar.addWidget(self.translatebutton)
+        self.save_sentence=QPushButton('Lưu câu vào project');self.save_sentence.clicked.connect(self.save_manual_sentence);entrybar.addWidget(self.save_sentence);entrybar.addStretch();right.addLayout(entrybar)
         sourcebar=QHBoxLayout();sourcebar.setSpacing(12);right.addLayout(sourcebar,2)
         for label,fieldname in [('TIẾNG ANH','source'),('BẢN DỊCH HIỆN TẠI','current')]:
             box=QVBoxLayout();box.setSpacing(5);box.addWidget(QLabel(label))
             field=QPlainTextEdit();field.setReadOnly(True);field.setMinimumHeight(58);field.setMaximumHeight(130);setattr(self,fieldname,field);box.addWidget(field,1);sourcebar.addLayout(box)
+        self.source.setPlaceholderText('Nhập hoặc dán câu tiếng Anh tại đây, rồi bấm Dịch sang tiếng Việt');self.source.textChanged.connect(self.source_edited)
         self.reviewtabs=QTabWidget();self.reviewtabs.setObjectName('reviewTabs');self.reviewtabs.setMinimumHeight(100);right.addWidget(self.reviewtabs,3)
         self.detail=QPlainTextEdit();self.detail.setReadOnly(True);self.detail.setMinimumHeight(50);self.reviewtabs.addTab(self.detail,'Nhận xét & ngữ cảnh')
         comparison=QWidget();comparebox=QHBoxLayout(comparison);comparebox.setContentsMargins(8,6,8,6);comparebox.setSpacing(12)
@@ -139,8 +147,12 @@ class Window(QMainWindow):
     def refresh_controls(self):
         has=bool(self.project);running=bool(self.worker)
         for w in self.actions[2:]+[self.runbutton]:w.setEnabled(has and not running)
-        selected=0<=self.table.currentRow()<len(self.data)
-        self.approvebutton.setEnabled(selected and not running);self.translation.setReadOnly(running or not selected);self.nextbutton.setEnabled(selected and not running)
+        manual=self.manual_mode.isChecked()
+        self.source.setReadOnly(running or not manual);self.manual_mode.setEnabled(not running)
+        self.translatebutton.setEnabled(not running and (manual or bool(self._selected_key)))
+        self.save_sentence.setVisible(manual);self.save_sentence.setEnabled(manual and not running and self._manual_result is not None)
+        selected=not manual and 0<=self.table.currentRow()<len(self.data)
+        self.approvebutton.setEnabled(selected and not running);self.translation.setReadOnly(running or not (selected or manual));self.nextbutton.setEnabled(selected and not running)
         self.notes.setReadOnly(running or not selected);self.reviewcheck.setEnabled(selected and not running);self.savenotes.setEnabled(selected and not running)
     def filter_rows(self):
         query=self.search.text().casefold();mode=self.filter.currentIndex()
@@ -168,6 +180,7 @@ class Window(QMainWindow):
     def error(self,e):QMessageBox.warning(self,'Thông báo',str(e))
     def attach(self,path):
         try:
+            if self.manual_mode.isChecked():self.manual_mode.setChecked(False)
             p=Project(path)
             if self.project:
                 self._flush_note_drafts()
@@ -205,7 +218,7 @@ class Window(QMainWindow):
     def open(self):
         if self.worker:return self.error('Dừng kiểm tra trước khi mở dữ liệu khác')
         paths=self.choose_files('Mở project hoặc dữ liệu Anh–Việt',
-            'Project và dữ liệu (*.lqa *.csv *.json *.docx *.doc);;Project (*.lqa);;JSON (*.json);;CSV (*.csv);;Word (*.docx *.doc)')
+            'Project và dữ liệu (*.lqa *.csv *.json *.xlsx *.xls *.docx *.doc);;Project (*.lqa);;JSON (*.json);;CSV (*.csv);;Excel (*.xlsx *.xls);;Word (*.docx *.doc)')
         if not paths:return
         try:
             from pathlib import Path
@@ -261,11 +274,11 @@ class Window(QMainWindow):
         from pathlib import Path
         from .input_json import load_json,load_json_pair,SingleLanguageJSONError
         if not paths:return False
-        if len(paths)>2:raise ValueError('Chọn một file CSV/Word/JSON song ngữ hoặc đúng hai file JSON Anh–Việt.')
+        if len(paths)>2:raise ValueError('Chọn một file CSV/Excel/Word/JSON song ngữ hoặc đúng hai file JSON Anh–Việt.')
         paths=[Path(path) for path in paths];report={}
         if len(paths)==2:
             if any(path.suffix.lower()!='.json' for path in paths):
-                raise ValueError('Chỉ chọn nhiều file khi nhập hai JSON Anh–Việt. CSV và Word cần chọn từng file.')
+                raise ValueError('Chỉ chọn nhiều file khi nhập hai JSON Anh–Việt. CSV, Excel và Word cần chọn từng file.')
             roles=self.choose_json_roles(paths)
             if roles is None:
                 self.status.setText('Đã hủy chọn ngôn ngữ. Project hiện tại được giữ nguyên.');return False
@@ -283,10 +296,13 @@ class Window(QMainWindow):
                     if roles is None:
                         self.status.setText('Đã hủy chọn ngôn ngữ. Project hiện tại được giữ nguyên.');return False
                     rows,report=load_json_pair(*roles);sources=list(roles)
+            elif suffix in ('.xlsx','.xls'):
+                from .input_excel import load_excel
+                rows=load_excel(path)
             elif suffix in ('.docx','.doc'):
                 from .input_word import load_word
                 rows=load_word(str(path))
-            else:raise ValueError('Chọn CSV, JSON, DOCX hoặc DOC. Có thể chọn cùng lúc hai JSON Anh–Việt.')
+            else:raise ValueError('Chọn CSV, Excel XLSX, JSON, DOCX hoặc DOC. Có thể chọn cùng lúc hai JSON Anh–Việt.')
         if not rows:raise ValueError('File chưa có cặp câu nào để nhập')
         if create_project:
             if not self.confirm_input_report(rows,report):return False
@@ -301,7 +317,7 @@ class Window(QMainWindow):
         """Retain the callback name; the primary input now accepts one or two files."""
         if not self.project or self.worker:return self.error('Tạo hoặc mở project trước; dừng kiểm tra nếu đang chạy')
         paths=self.choose_files('Chọn dữ liệu • Có thể chọn cùng lúc hai JSON Anh–Việt',
-            'Dữ liệu (*.csv *.json *.docx *.doc);;JSON Anh–Việt (*.json);;CSV (*.csv);;Word (*.docx *.doc)')
+            'Dữ liệu (*.csv *.json *.xlsx *.xls *.docx *.doc);;JSON Anh–Việt (*.json);;CSV (*.csv);;Excel (*.xlsx *.xls);;Word (*.docx *.doc)')
         if not paths:return
         try:self.import_selected_paths(paths)
         except Exception as e:self.error(e)
@@ -365,6 +381,7 @@ class Window(QMainWindow):
                 if r['key']==oldkey:self.table.selectRow(i);break
         self.filter_rows();self.refresh_controls()
     def select(self):
+        if self.manual_mode.isChecked():return
         i=self.table.currentRow()
         if i<0 or i>=len(self.data):
             self.rowtitle.setText('');self.focuslabel.setText('CHỌN MỘT CÂU ĐỂ REVIEW')
@@ -394,7 +411,79 @@ class Window(QMainWindow):
             self._translation_drafts.pop(r['key'],None);self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
         self.translation.setPlainText(draft['text'] if valid_draft else r['approved'] if r['approved'] is not None else result.get('suggestion') or r['vietnamese'])
         self._loading_feedback=False;self.refresh_controls()
+    def toggle_manual(self,checked):
+        if self.worker:return
+        self._loading_feedback=True
+        if checked:
+            self._flush_note_drafts();self.source.setPlainText(self._manual_source)
+            self.current.clear();self.translation.clear();self.notes.clear();self.detail.setPlainText('Nhập tiếng Anh và bấm Dịch sang tiếng Việt. Bản dịch mới cần bạn duyệt.')
+            self.local_text.clear();self.gemini_text.clear();self._manual_result=None
+            self.focuslabel.setText('DỊCH CÂU NHẬP TRỰC TIẾP');self.rowtitle.setText('Chưa lưu vào project');self.reviewcheck.setChecked(False)
+        else:
+            self._manual_source=self.source.toPlainText();self._manual_result=None
+        self._loading_feedback=False
+        if not checked:self.select()
+        self.refresh_controls()
+
+    def source_edited(self):
+        if self._loading_feedback or not self.manual_mode.isChecked():return
+        self._manual_source=self.source.toPlainText();self._manual_result=None
+        self.current.clear();self.translation.clear();self.refresh_controls()
+
+    def translate_source(self):
+        if self.worker:return
+        english=self.source.toPlainText()
+        if not english.strip():return self.error('Nhập câu tiếng Anh trước khi dịch')
+        if not self.key.text().strip():return self.error('Nhập API key trong Cấu hình Gemini để dịch')
+        try:model_chain(self.model.text(),self.fallback_models.text())
+        except ValueError as exc:return self.error(exc)
+        manual=self.manual_mode.isChecked()
+        row={'key':'direct','english':english,'vietnamese':'','context':''}
+        if not manual:
+            row=next((dict(r) for r in self.data if r['key']==self._selected_key),None)
+            if row is None:return self.error('Chọn câu hoặc bật Nhập trực tiếp')
+        self._translation_request=(manual,row)
+        self.last_error='';self.worker=TranslationWorker(self.project.path if self.project else None,row,self.key.text().strip(),self.model.text().strip(),self.fallback_models.text(),self.context.toPlainText())
+        self.worker.progress.connect(self.status.setText);self.worker.failed.connect(self.run_error);self.worker.ready.connect(self.translation_ready);self.worker.finished.connect(self.translation_finished)
+        self.busy(True);self.status.setText('Đang dịch sang tiếng Việt…');self.worker.start()
+
+    def translation_ready(self,result):
+        manual,row=self._translation_request
+        self._loading_feedback=True
+        self.translation.setPlainText(result['suggestion']);self.gemini_text.setPlainText(result['suggestion'])
+        self.detail.setPlainText('Model xử lý: '+result['model_used']+(' (dự phòng)' if result.get('used_fallback') else '')+'\n'+result['reason']+'\nBản dịch mới chưa được duyệt.')
+        if manual:
+            self.current.setPlainText(result['suggestion']);self._manual_result=result
+        else:
+            self.project.save_backend_result(row['key'],'gemini',{**result,'translation':result['suggestion']})
+            self._translation_drafts[row['key']]={name:row.get(name) or '' for name in ('english','vietnamese','context')}
+            self._translation_drafts[row['key']]['text']=result['suggestion']
+            self.project.set_setting('translation_drafts',json.dumps(self._translation_drafts,ensure_ascii=False))
+        self._loading_feedback=False
+
+    def translation_finished(self):
+        self.worker=None;self.busy(False);self.refresh_controls()
+        self.status.setText(self.last_error or ('Đã có bản dịch. Chỉnh và lưu câu vào project để review.' if self.manual_mode.isChecked() else 'Đã có bản dịch nháp. Kiểm tra trước khi duyệt.'))
+
+    def save_manual_sentence(self):
+        if self.worker or not self.manual_mode.isChecked() or not self._manual_result:return
+        text=self.translation.toPlainText();english=self.source.toPlainText()
+        if not text.strip() or 'Placeholder không khớp' in technical(english,text):return self.error('Bản dịch cần có nội dung và giữ đúng placeholder')
+        result=dict(self._manual_result);result['suggestion']=text
+        # Ask for a project destination only when the user explicitly saves.
+        if not self.project:
+            if not self.create_input_project():return
+        import uuid
+        key='manual/'+uuid.uuid4().hex
+        self.project.import_rows([{'key':key,'english':english,'vietnamese':'','context':self.context.toPlainText()}])
+        self.project.save_result(key,result)
+        self.manual_mode.setChecked(False);self.refresh();self.search.clear();self.filter.setCurrentIndex(0)
+        for i,r in enumerate(self.data):
+            if r['key']==key:self.table.selectRow(i);break
+        self.status.setText('Đã lưu câu và bản dịch đề xuất. Chưa duyệt bản sửa.')
+
     def translation_edited(self):
+        if self.manual_mode.isChecked():return
         if not self._loading_feedback and self._selected_key and self.project and not self.worker:
             row=next((row for row in self.data if row['key']==self._selected_key),None)
             if row is None:return
@@ -447,8 +536,9 @@ class Window(QMainWindow):
             self.key.clear()
         except Exception:self.error('Không xóa được key trong kho bảo mật')
     def busy(self,on):
-        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline]:w.setEnabled(not on)
-        self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
+        self.table.setEnabled(not on)
+        for w in self.actions+[self.runbutton,self.approvebutton,self.context,self.model,self.fallback_models,self.offline,self.manual_mode,self.translatebutton,self.save_sentence]:w.setEnabled(not on)
+        self.source.setReadOnly(on or not self.manual_mode.isChecked());self.translation.setReadOnly(on);self.notes.setReadOnly(on);self.reviewcheck.setEnabled(not on);self.savenotes.setEnabled(not on);self.nextbutton.setEnabled(not on)
         self.table.blockSignals(True)
         for row in range(self.table.rowCount()):
             item=self.table.item(row,4)
@@ -460,6 +550,7 @@ class Window(QMainWindow):
         self.runbutton.setText('Đang kiểm tra…' if on else 'Kiểm tra / Tiếp tục')
         self.stopbutton.setEnabled(on)
     def run(self):
+        if self.manual_mode.isChecked():return self.translate_source()
         if not self.project:return self.error('Tạo hoặc mở project trước')
         if not self.offline.isChecked() and not self.key.text().strip():return self.error('Nhập Gemini API key hoặc chọn kiểm tra kỹ thuật')
         if not self.model.text().strip():return self.error('Nhập tên model')

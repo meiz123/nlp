@@ -62,3 +62,21 @@ class GeminiTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TranslationAdapterTests(unittest.TestCase):
+    @patch('localqa.gemini.genai.Client')
+    def test_translation_contract_keeps_source_as_data(self, client_type):
+        result=dict(status='REVIEW',issues=['Bản dịch mới cần duyệt'],reason='Giữ nguyên biến.',suggestion='Chào {name}')
+        client_type.return_value.models.generate_content.return_value=SimpleNamespace(text=json.dumps(result))
+        adapter=Gemini('fake');row={'english':'Hello {name}','vietnamese':'','context':'Greeting'}
+        self.assertEqual(adapter.translate(row,'test-model','glossary'),result)
+        call=client_type.return_value.models.generate_content.call_args.kwargs
+        self.assertEqual(json.loads(call['contents'])['english'],row['english'])
+        self.assertNotIn('vietnamese',json.loads(call['contents']));adapter.close()
+    @patch('localqa.gemini.genai.Client')
+    def test_empty_translation_or_pass_is_not_accepted(self, client_type):
+        adapter=Gemini('fake')
+        for result in [dict(status='PASS',issues=[],reason='OK',suggestion=''),dict(status='REVIEW',issues=['Mơ hồ'],reason='Thiếu ngữ cảnh',suggestion='')]:
+            client_type.return_value.models.generate_content.return_value=SimpleNamespace(text=json.dumps(result))
+            with self.assertRaises(ValueError):adapter.translate({'english':'Save'},'model','')
+        adapter.close()
